@@ -55,27 +55,35 @@ def auto_register_routers(app: FastAPI, apis_dir: str = "apis") -> None:
                 for attr_name in dir(module):
                     attr = getattr(module, attr_name)
                     if isinstance(attr, APIRouter):
-                        # 파일 경로에서 버전 정보 추출 (v1, v2 등)
-                        relative_path = python_file.relative_to(apis_path)
-                        version = relative_path.parts[0] if len(relative_path.parts) > 1 else ""
-
                         # 라우터의 태그 설정
                         module_name = python_file.stem
                         if not attr.tags:
                             attr.tags = [module_name]
 
-                        # 라우터 등록 (버전별로 prefix 설정)
-                        if version:
-                            prefix = f"/api/{version}"
+                        # 기존 prefix 제거 (만약 있다면)
+                        if hasattr(attr, "prefix"):
+                            original_prefix = attr.prefix
+                            attr.prefix = ""  # 기존 prefix 제거
                         else:
-                            prefix = "/api"
+                            original_prefix = ""
 
-                        app.include_router(attr)
-                        logger.info(f"라우터 등록 완료: {module_name} ({prefix})")
+                        # 파일 경로에서 버전 정보 추출 (v1, v2 등)
+                        relative_path = python_file.relative_to(apis_path)
+                        version = relative_path.parts[0] if len(relative_path.parts) > 1 else ""
+
+                        # 새로운 prefix 설정
+                        if version:
+                            new_prefix = f"/api/{version}{original_prefix}"
+                        else:
+                            new_prefix = f"/api{original_prefix}"
+
+                        # 라우터 등록
+                        app.include_router(attr, prefix=new_prefix)
+                        logger.info(f"라우터 등록 완료: {module_name} ({new_prefix})")
 
             except Exception as e:
                 logger.error(f"라우터 로드 중 오류 발생 ({module_path}): {str(e)}")
-                logger.exception(e)  # 상세 에러 트레이스 출력
+                logger.exception(e)
 
     except Exception as e:
         logger.error(f"라우터 자동 등록 중 오류 발생: {str(e)}")

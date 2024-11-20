@@ -9,7 +9,7 @@ from models.aws_account import (
 )
 from modules.aws_account_module import AWSAccountModule
 
-router = APIRouter(prefix="/v1/aws-accounts", tags=["aws-accounts"])
+router = APIRouter(prefix="/aws-accounts", tags=["aws-accounts"])
 aws_account_module = AWSAccountModule()
 
 @router.post("/", response_model=AWSAccountResponse)

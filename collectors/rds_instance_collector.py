@@ -1,14 +1,15 @@
 # collectors/rds_instance_collector.py
 
 import os
-import json
 import logging
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime, timezone, timedelta
 from botocore.exceptions import ClientError
 from motor.motor_asyncio import AsyncIOMotorClient
+from models.aws_account import AWSAccountInDB
 
 from modules.aws_session_manager import AWSSessionManager, EnvironmentType
+from modules.aws_account_module import AWSAccountModule
 
 # 로깅 설정
 LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
@@ -26,21 +27,41 @@ class RDSInstanceCollector:
         self.mongodb_db_name = os.getenv('MONGODB_DB_NAME')
         self.collection_name = 'aws_rds_instance_all_stat'
 
-        # AWS 설정
-        aws_regions_str = os.getenv('AWS_REGIONS')
-        if not aws_regions_str:
-            raise ValueError("AWS_REGIONS is not set")
-        try:
-            self.aws_regions = json.loads(aws_regions_str)
-        except json.JSONDecodeError:
-            raise ValueError("AWS_REGIONS is not a valid JSON string")
-
         # 시간대 설정
         self.kst = timezone(timedelta(hours=9))
         self.datetime_format = "%Y-%m-%d %H:%M:%S KST"
 
         # AWS 세션 관리자
         self.session_manager = AWSSessionManager()
+
+        # AWS 계정 모듈
+        self.aws_account_module = AWSAccountModule()
+
+    async def get_target_accounts(self, env: str) -> List[AWSAccountInDB]:
+        """지정된 환경의 AWS 계정 정보 조회
+
+        Args:
+            env: 환경 구분 ('prd' 또는 'dev')
+
+        Returns:
+            계정 정보 목록 (계정ID와 리전 정보 포함)
+        """
+        try:
+            accounts = await self.aws_account_module.get_accounts_by_environment(env)
+            if not accounts:
+                logger.warning(f"No accounts found for environment: {env}")
+            else:
+                logger.info(f"Found {len(accounts)} accounts for environment: {env}")
+                for account in accounts:
+                    logger.info(
+                        f"Account: {account.aws_account_id} "
+                        f"({account.aws_account_name}), "
+                        f"Regions: {', '.join(account.regions)}"
+                    )
+            return accounts
+        except Exception as e:
+            logger.error(f"Failed to retrieve account information: {e}")
+            raise
 
     def get_kst_time(self) -> str:
         """현재 KST 시간을 포맷에 맞춰 반환"""
@@ -59,11 +80,16 @@ class RDSInstanceCollector:
             return None
         return dt.strftime(self.datetime_format)
 
-    async def get_rds_instances(self, account_id: str) -> List[dict]:
-        """특정 계정의 RDS 인스턴스 정보 수집"""
-        instances = []
+    async def get_rds_instances(self, account: AWSAccountInDB) -> List[dict]:
+        """특정 계정의 RDS 인스턴스 정보 수집
 
-        for region in self.aws_regions:
+        Args:
+            account: AWS 계정 정보 (계정ID와 리전 목록 포함)
+        """
+        instances = []
+        account_id = account.aws_account_id
+
+        for region in account.regions:
             try:
                 # AWS 세션 매니저를 통해 RDS 클라이언트 생성
                 rds = self.session_manager.get_client('rds', account_id, region)
@@ -95,9 +121,13 @@ class RDSInstanceCollector:
                         }
                         instances.append(instance_data)
 
+                logger.debug(f"Found {len(instances)} instances in region {region}")
+
             except ClientError as e:
                 logger.error(f"Error fetching RDS instances in account {account_id}, region {region}: {e}")
+                continue
 
+        logger.info(f"Total {len(instances)} instances found in account {account_id}")
         return instances
 
     async def save_to_mongodb(self, instances: List[dict], account_id: str) -> None:
@@ -124,54 +154,55 @@ class RDSInstanceCollector:
     async def run(self, env: str = 'prd') -> None:
         """RDS 인스턴스 수집 실행"""
         try:
-            # 계정 리스트 정의
-            accounts = {
-                'prd': ['488659748805', '578868370045', '790631726648',
-                        '732250966717', '518026839586', '897374448634'],
-                'dev': ['708010261224', '058264293746', '637423179433']
-            }
-
-            target_accounts = accounts.get(env, [])
-            if not target_accounts:
-                logger.warning(f"No accounts defined for environment: {env}")
+            # AWS 계정 정보 조회
+            accounts = await self.get_target_accounts(env)
+            if not accounts:
+                logger.warning(f"No accounts to process for environment: {env}")
                 return
 
-            logger.info(f"Starting RDS instance collection for {len(target_accounts)} "
-                        f"accounts in {env} environment")
+            logger.info(f"Starting RDS instance collection for {len(accounts)} accounts")
 
             # 환경에 따른 세션 초기화
             if self.session_manager.environment == EnvironmentType.LOCAL:
                 # 로컬 환경에서는 각 계정별로 SSO 세션 생성
-                for account_id in target_accounts:
+                for account in accounts:
                     try:
-                        session = self.session_manager._get_sso_session(account_id)
-                        self.session_manager._sessions[account_id] = session
+                        session = self.session_manager._get_sso_session(account.aws_account_id)
+                        self.session_manager._sessions[account.aws_account_id] = session
                     except Exception as e:
-                        logger.error(f"Failed to create SSO session for account {account_id}: {e}")
+                        logger.error(f"Failed to create SSO session for account {account.aws_account_id}: {e}")
                         continue
             else:
                 # EC2/EKS 환경에서는 각 계정별로 Role 세션 생성
-                for account_id in target_accounts:
+                for account in accounts:
                     try:
-                        session = self.session_manager._get_role_session(account_id)
-                        self.session_manager._sessions[account_id] = session
+                        session = self.session_manager._get_role_session(account.aws_account_id)
+                        self.session_manager._sessions[account.aws_account_id] = session
                     except Exception as e:
-                        logger.error(f"Failed to create role session for account {account_id}: {e}")
+                        logger.error(f"Failed to create role session for account {account.aws_account_id}: {e}")
                         continue
 
             # 각 계정별로 RDS 인스턴스 수집
-            for account_id in target_accounts:
+            for account in accounts:
                 try:
-                    logger.info(f"Processing account: {account_id}")
+                    logger.info(
+                        f"Processing account {account.aws_account_id} "
+                        f"({account.aws_account_name}) "
+                        f"in regions: {', '.join(account.regions)}"
+                    )
 
-                    instances = await self.get_rds_instances(account_id)
+                    instances = await self.get_rds_instances(account)
                     if instances:
-                        await self.save_to_mongodb(instances, account_id)
+                        await self.save_to_mongodb(instances, account.aws_account_id)
+                        logger.info(f"Successfully processed account {account.aws_account_id}")
                     else:
-                        logger.warning(f"No RDS instances found for account {account_id}")
+                        logger.warning(f"No RDS instances found for account {account.aws_account_id}")
 
                 except Exception as e:
-                    logger.exception(f"Unexpected error processing account {account_id}: {str(e)}")
+                    logger.exception(f"Error processing account {account.aws_account_id}: {str(e)}")
+                    continue
+
+            logger.info("RDS instance collection completed successfully")
 
         except Exception as e:
             logger.exception(f"Failed to run RDS instance collection: {str(e)}")

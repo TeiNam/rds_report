@@ -6,7 +6,7 @@ from collectors.cloudwatch_metric_collector import RDSCloudWatchCollector
 from modules.aws_session_manager import AWSSessionManager
 import logging
 
-router = APIRouter(prefix="/v1/reports/monthly", tags=["reports"])
+router = APIRouter(prefix="/reports/monthly", tags=["reports"])
 logger = logging.getLogger(__name__)
 
 
@@ -22,12 +22,6 @@ async def collect_monthly_metrics(
         year: 수집할 연도
         month: 수집할 월 (1-12)
         env: 환경 구분 ('prd' 또는 'dev')
-
-    Returns:
-        메트릭 수집 결과
-
-    Raises:
-        HTTPException: 메트릭 수집 중 오류 발생 시
     """
     try:
         # AWS 세션 매니저 초기화
