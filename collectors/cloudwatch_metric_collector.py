@@ -15,6 +15,7 @@ from configs.mongo_conf import mongo_settings
 logger = logging.getLogger(__name__)
 kst = pytz.timezone('Asia/Seoul')
 
+MAX_CONCURRENT_TASKS = 20
 
 class RDSCloudWatchCollector:
     """RDS CloudWatch 메트릭 수집기"""
@@ -93,6 +94,10 @@ class RDSCloudWatchCollector:
             logger.error(f"월간 메트릭 수집 중 오류 발생: {e}")
             raise
 
+    MAX_CONCURRENT_TASKS = 20  # 클래스 변수로 추가
+
+    # collectors/cloudwatch_metric_collector.py의 _collect_monthly_metrics 메서드 수정
+
     async def _collect_monthly_metrics(
             self,
             account: Any,
@@ -113,7 +118,8 @@ class RDSCloudWatchCollector:
         try:
             logger.info(
                 f"\n[{account.account_id}] "
-                f"{account.instance_count}개 인스턴스 처리 시작"
+                f"{account.instance_count}개 인스턴스 처리 시작: "
+                f"[{', '.join(inst.instance_identifier for inst in account.instances)}]"  # 인스턴스 목록 추가
             )
 
             monthly_metrics = {}
@@ -121,6 +127,7 @@ class RDSCloudWatchCollector:
 
             while current_date <= end_date:
                 date_str = current_date.strftime('%Y-%m-%d')
+                logger.info(f"\n[{account.account_id}] {date_str} 메트릭 수집 시작")
 
                 # 인스턴스별 병렬 처리
                 tasks = [
@@ -135,6 +142,7 @@ class RDSCloudWatchCollector:
                 instance_results = await asyncio.gather(*tasks, return_exceptions=True)
 
                 # 결과 처리
+                successful_instances = []  # 성공한 인스턴스 목록
                 for instance, metrics in zip(account.instances, instance_results):
                     if isinstance(metrics, Exception):
                         logger.error(
@@ -147,9 +155,14 @@ class RDSCloudWatchCollector:
                         if instance.instance_identifier not in monthly_metrics:
                             monthly_metrics[instance.instance_identifier] = {}
                         monthly_metrics[instance.instance_identifier][date_str] = metrics
+                        successful_instances.append(instance.instance_identifier)
 
                 current_date += timedelta(days=1)
-                logger.info(f"[{account.account_id}] {date_str} 메트릭 수집 완료")
+                logger.info(
+                    f"[{account.account_id}] {date_str} 메트릭 수집 완료 "
+                    f"({len(successful_instances)}/{len(account.instances)} 인스턴스): "
+                    f"[{', '.join(sorted(successful_instances))}]"  # 성공한 인스턴스 목록
+                )
 
             return monthly_metrics
 
@@ -159,6 +172,10 @@ class RDSCloudWatchCollector:
                 f"월간 메트릭 수집 중 오류 발생: {e}"
             )
             raise
+
+    def _chunk_instances(self, instances: List[Any], chunk_size: int) -> List[List[Any]]:
+        """인스턴스 리스트를 청크로 분할"""
+        return [instances[i:i + chunk_size] for i in range(0, len(instances), chunk_size)]
 
     async def _collect_instance_metrics(
             self,

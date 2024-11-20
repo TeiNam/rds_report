@@ -1,11 +1,13 @@
-# Test your FastAPI endpoints
+### @name collect-monthly-metrics.http
+### RDS CloudWatch 메트릭 수집 API
+### 월간 메트릭 수집 - 프로덕션 환경 (현재 연도/월)
+GET http://localhost:8000/api/v1/collect-monthly-metrics?year=2024&month=10&env=prd
 
-GET http://127.0.0.1:8000/
-Accept: application/json
+### 월간 메트릭 수집 - 개발 환경
+GET http://localhost:8000/collect-monthly-metrics?year=2023&month=11&env=dev
 
-###
+### 과거 데이터 수집 예시 (2023년 10월)
+GET http://localhost:8000/collect-monthly-metrics?year=2023&month=10&env=prd
 
-GET http://127.0.0.1:8000/hello/User
-Accept: application/json
-
-###
+### 과거 데이터 수집 예시 (2023년 9월)
+GET http://localhost:8000/collect-monthly-metrics?year=2023&month=9&env=prd

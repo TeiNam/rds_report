@@ -5,6 +5,7 @@ import os
 import json
 import subprocess
 import pytz
+import botocore.config
 from datetime import datetime, timedelta
 from botocore.exceptions import ClientError
 from typing import Optional, Dict, Any, List, Literal
@@ -260,9 +261,22 @@ class AWSSessionManager:
     def get_client(self, service_name: str, account_id: str, region: Optional[str] = None) -> Any:
         """특정 서비스의 클라이언트 반환"""
         session = self.get_session(account_id)
+
+        # AWS SDK Config 설정
+        config = botocore.config.Config(
+            max_pool_connections=50,  # 연결 풀 크기 증가
+            retries=dict(
+                max_attempts=3  # 재시도 횟수
+            ),
+            connect_timeout=5,  # 연결 타임아웃 (초)
+            read_timeout=60,  # 읽기 타임아웃 (초)
+            tcp_keepalive=True  # TCP 연결 유지
+        )
+
         return session.client(
             service_name,
-            region_name=region or self.sso_config.DEFAULT_REGION
+            region_name=region or self.sso_config.DEFAULT_REGION,
+            config=config
         )
 
     def get_resource(self, service_name: str, account_id: str, region: Optional[str] = None) -> Any:
