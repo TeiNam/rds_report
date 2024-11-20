@@ -67,3 +67,17 @@ Content-Type: {{contentType}}
 }
 
 
+### 월간 메트릭 수집 (현재 연도/월)
+GET {{baseUrl}}/v1/reports/monthly/metrics?year=2024&month=11&env=prd
+
+### 월간 메트릭 수집 (특정 연도/월 - 프로덕션)
+GET {{baseUrl}}/v1/reports/monthly/metrics
+    ?year=2024
+    &month=10
+    &env=prd
+
+### 월간 메트릭 수집 (특정 연도/월 - 개발)
+GET {{baseUrl}}/v1/reports/monthly/metrics
+    ?year=2024
+    &month=10
+    &env=dev
