@@ -1,13 +1,14 @@
 # collectors/rds_instance_collector.py
 
 import os
+import json
 import logging
 from typing import Dict, List, Optional, Any
 from datetime import datetime, timezone, timedelta
 from botocore.exceptions import ClientError
 from motor.motor_asyncio import AsyncIOMotorClient
-from modules.aws_session_manager import AWSSessionManager
 
+from modules.aws_session_manager import AWSSessionManager, EnvironmentType
 
 # 로깅 설정
 LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
@@ -25,11 +26,20 @@ class RDSInstanceCollector:
         self.mongodb_db_name = os.getenv('MONGODB_DB_NAME')
         self.collection_name = 'aws_rds_instance_all_stat'
 
+        # AWS 설정
+        aws_regions_str = os.getenv('AWS_REGIONS')
+        if not aws_regions_str:
+            raise ValueError("AWS_REGIONS is not set")
+        try:
+            self.aws_regions = json.loads(aws_regions_str)
+        except json.JSONDecodeError:
+            raise ValueError("AWS_REGIONS is not a valid JSON string")
+
         # 시간대 설정
         self.kst = timezone(timedelta(hours=9))
         self.datetime_format = "%Y-%m-%d %H:%M:%S KST"
 
-        # AWS 세션 관리자 초기화
+        # AWS 세션 관리자
         self.session_manager = AWSSessionManager()
 
     def get_kst_time(self) -> str:
@@ -49,56 +59,44 @@ class RDSInstanceCollector:
             return None
         return dt.strftime(self.datetime_format)
 
-    async def get_rds_instances(self, session_manager: AWSSessionManager, account_id: str) -> List[dict]:
+    async def get_rds_instances(self, account_id: str) -> List[dict]:
         """특정 계정의 RDS 인스턴스 정보 수집"""
         instances = []
-        instance_info = session_manager.get_instance_info()
-        if not instance_info:
-            logger.error(f"No instance information available for account {account_id}")
-            return instances
 
-        account_instances = next((acc for acc in instance_info.accounts if acc.account_id == account_id), None)
-        if not account_instances:
-            logger.error(f"No instances found for account {account_id}")
-            return instances
-
-        for instance in account_instances.instances:
+        for region in self.aws_regions:
             try:
-                rds = session_manager.get_client('rds', account_id, instance.region)
-                response = rds.describe_db_instances(
-                    DBInstanceIdentifier=instance.instance_identifier
-                )
+                # AWS 세션 매니저를 통해 RDS 클라이언트 생성
+                rds = self.session_manager.get_client('rds', account_id, region)
+                paginator = rds.get_paginator('describe_db_instances')
 
-                for db in response['DBInstances']:
-                    instance_data = {
-                        'AccountId': account_id,
-                        'Region': instance.region,
-                        'DBInstanceIdentifier': db.get('DBInstanceIdentifier'),
-                        'DBInstanceClass': db.get('DBInstanceClass'),
-                        'Engine': db.get('Engine'),
-                        'EngineVersion': db.get('EngineVersion'),
-                        'Endpoint': {
-                            'Address': db.get('Endpoint', {}).get('Address'),
-                            'Port': db.get('Endpoint', {}).get('Port')
-                        } if db.get('Endpoint') else None,
-                        'DBInstanceStatus': db.get('DBInstanceStatus'),
-                        'MasterUsername': db.get('MasterUsername'),
-                        'AllocatedStorage': db.get('AllocatedStorage'),
-                        'AvailabilityZone': db.get('AvailabilityZone'),
-                        'MultiAZ': db.get('MultiAZ'),
-                        'StorageType': db.get('StorageType'),
-                        'InstanceCreateTime': self.format_datetime(
-                            self.convert_utc_to_kst(db.get('InstanceCreateTime'))
-                        ),
-                        'Tags': instance.tags
-                    }
-                    instances.append(instance_data)
+                for page in paginator.paginate():
+                    for db in page['DBInstances']:
+                        instance_data = {
+                            'AccountId': account_id,
+                            'Region': region,
+                            'DBInstanceIdentifier': db.get('DBInstanceIdentifier'),
+                            'DBInstanceClass': db.get('DBInstanceClass'),
+                            'Engine': db.get('Engine'),
+                            'EngineVersion': db.get('EngineVersion'),
+                            'Endpoint': {
+                                'Address': db.get('Endpoint', {}).get('Address'),
+                                'Port': db.get('Endpoint', {}).get('Port')
+                            } if db.get('Endpoint') else None,
+                            'DBInstanceStatus': db.get('DBInstanceStatus'),
+                            'MasterUsername': db.get('MasterUsername'),
+                            'AllocatedStorage': db.get('AllocatedStorage'),
+                            'AvailabilityZone': db.get('AvailabilityZone'),
+                            'MultiAZ': db.get('MultiAZ'),
+                            'StorageType': db.get('StorageType'),
+                            'InstanceCreateTime': self.format_datetime(
+                                self.convert_utc_to_kst(db.get('InstanceCreateTime'))
+                            ),
+                            'Tags': {tag['Key']: tag['Value'] for tag in db.get('TagList', [])}
+                        }
+                        instances.append(instance_data)
 
             except ClientError as e:
-                logger.error(
-                    f"Error fetching RDS instance {instance.instance_identifier} "
-                    f"in account {account_id}, region {instance.region}: {e}"
-                )
+                logger.error(f"Error fetching RDS instances in account {account_id}, region {region}: {e}")
 
         return instances
 
@@ -123,28 +121,50 @@ class RDSInstanceCollector:
         finally:
             client.close()
 
-    async def run(self, env: str = 'prd', date: Optional[str] = None) -> None:
+    async def run(self, env: str = 'prd') -> None:
         """RDS 인스턴스 수집 실행"""
         try:
-            # AWS 세션 매니저 초기화
-            await self.session_manager.initialize(env=env, end_date=date)
-            instance_info = self.session_manager.get_instance_info()
+            # 계정 리스트 정의
+            accounts = {
+                'prd': ['488659748805', '578868370045', '790631726648',
+                        '732250966717', '518026839586', '897374448634'],
+                'dev': ['708010261224', '058264293746', '637423179433']
+            }
 
-            if not instance_info or not instance_info.accounts:
-                logger.warning(f"No accounts found for environment: {env}")
+            target_accounts = accounts.get(env, [])
+            if not target_accounts:
+                logger.warning(f"No accounts defined for environment: {env}")
                 return
 
-            logger.info(
-                f"Starting RDS instance collection for {len(instance_info.accounts)} accounts "
-                f"in {env} environment"
-            )
+            logger.info(f"Starting RDS instance collection for {len(target_accounts)} "
+                        f"accounts in {env} environment")
 
-            for account in instance_info.accounts:
+            # 환경에 따른 세션 초기화
+            if self.session_manager.environment == EnvironmentType.LOCAL:
+                # 로컬 환경에서는 각 계정별로 SSO 세션 생성
+                for account_id in target_accounts:
+                    try:
+                        session = self.session_manager._get_sso_session(account_id)
+                        self.session_manager._sessions[account_id] = session
+                    except Exception as e:
+                        logger.error(f"Failed to create SSO session for account {account_id}: {e}")
+                        continue
+            else:
+                # EC2/EKS 환경에서는 각 계정별로 Role 세션 생성
+                for account_id in target_accounts:
+                    try:
+                        session = self.session_manager._get_role_session(account_id)
+                        self.session_manager._sessions[account_id] = session
+                    except Exception as e:
+                        logger.error(f"Failed to create role session for account {account_id}: {e}")
+                        continue
+
+            # 각 계정별로 RDS 인스턴스 수집
+            for account_id in target_accounts:
                 try:
-                    account_id = account.account_id
                     logger.info(f"Processing account: {account_id}")
 
-                    instances = await self.get_rds_instances(self.session_manager, account_id)
+                    instances = await self.get_rds_instances(account_id)
                     if instances:
                         await self.save_to_mongodb(instances, account_id)
                     else:

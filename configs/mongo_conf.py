@@ -22,6 +22,9 @@ class MongoSettings(BaseSettings):
     MONGO_COM_STATUS_COLLECTION: str = os.getenv(
         "MONGO_COM_STATUS_COLLECTION", "mysql_com_status"
     )
+    MONGO_AWS_ACCOUNT_COLLECTION: str = os.getenv(
+        "MONGO_AWS_ACCOUNT_COLLECTION", "aws_account_info"
+    )
 
     class Config:
         env_file = ".env"
