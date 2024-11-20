@@ -2,7 +2,7 @@
 
 import os
 import logging
-from typing import Dict, List, Optional, Any, Tuple
+from typing import List, Optional
 from datetime import datetime, timezone, timedelta
 from botocore.exceptions import ClientError
 from motor.motor_asyncio import AsyncIOMotorClient
