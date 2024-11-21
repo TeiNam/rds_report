@@ -25,6 +25,9 @@ class MongoSettings(BaseSettings):
     MONGO_AWS_ACCOUNT_COLLECTION: str = os.getenv(
         "MONGO_AWS_ACCOUNT_COLLECTION", "aws_account_info"
     )
+    MONGO_MONTHLY_INSTANCE_STATISTICS_COLLECTION: str = os.getenv(
+        "MONGO_MONTHLY_INSTANCE_STATISTICS_COLLECTION", "monthly_instance_statistics"
+    )
 
     class Config:
         env_file = ".env"

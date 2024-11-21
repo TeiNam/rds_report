@@ -2,13 +2,14 @@
 import asyncio
 import os
 import json
-from datetime import datetime, date
-from pathlib import Path
 from calendar import monthrange
-from datetime import date
+from datetime import date, datetime
 from report_tools.instance_statistics import InstanceStatisticsTool
 from report_tools.generators.instance_report import ReportGenerator
 from report_tools.generators.base import BaseReportGenerator
+from configs.mongo_conf import mongo_settings
+from modules.mongodb_connector import MongoDBConnector
+from zoneinfo import ZoneInfo
 
 
 class MonthlyReportGenerator(BaseReportGenerator):
@@ -77,11 +78,16 @@ async def generate_monthly_report(year: int = None, month: int = None):
 
         print(f"\n3. 통계 데이터 저장 완료: {json_file}")
 
+        # MongoDB에 저장
+        await save_to_mongodb(report_data, year, month)
+
+        print("\n4. MongoDB 저장 완료")
+
         # 리포트 및 그래프 생성
         report_generator = ReportGenerator(generator.output_dir)
         report_file = report_generator.create_report(daily_stats)
 
-        print("\n4. 리포트 생성 완료")
+        print("\n5. 리포트 생성 완료")
         print(f"- 리포트 파일: {report_file}")
         print(f"- 그래프 경로: {report_generator.graphs_dir}")
 
@@ -111,7 +117,7 @@ async def generate_monthly_report(year: int = None, month: int = None):
                     f.write(f"- {instance['id']} (삭제일: {instance['deleted_at']})\n")
                 f.write("\n")
 
-        print("\n5. 월간 변경사항 추가 완료")
+        print("\n6. 월간 변경사항 추가 완료")
         print("\n작업이 완료되었습니다!")
 
     except Exception as e:
@@ -154,6 +160,39 @@ def get_previous_month(current_date: date = None) -> tuple[int, int]:
         return current_date.year - 1, 12
     else:
         return current_date.year, current_date.month - 1
+
+async def save_to_mongodb(report_data: dict, year: int, month: int):
+    """MongoDB에 통계 데이터 저장"""
+
+    try:
+        # MongoDB 데이터베이스 연결
+        db = await MongoDBConnector.get_database()
+
+        # 컬렉션 이름 동적으로 설정
+        collection_name = mongo_settings.MONGO_MONTHLY_INSTANCE_STATISTICS_COLLECTION
+        collection = db[collection_name]
+
+        # 저장할 데이터 준비
+        data_to_save = {
+            "year": year,
+            "month": month,
+            "report_date": f"{year}-{month:02d}",
+            "statistics": report_data,
+            "created_at": datetime.now(ZoneInfo("Asia/Seoul"))  # KST 시간
+        }
+
+        # 데이터 저장 (기존 데이터가 있으면 업데이트, 없으면 삽입)
+        await collection.update_one(
+            {"year": year, "month": month},  # 중복 방지 조건
+            {"$set": data_to_save},  # 데이터를 덮어씀
+            upsert=True  # 문서가 없으면 삽입
+        )
+
+        print(f"MongoDB에 월간 통계 저장 완료: {year}-{month:02d}")
+
+    except Exception as e:
+        print(f"MongoDB 저장 중 오류 발생: {str(e)}")
+        raise
 
 
 if __name__ == "__main__":

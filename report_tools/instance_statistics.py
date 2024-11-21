@@ -3,7 +3,6 @@ from typing import List, Dict, Any, Optional, Set
 from datetime import datetime, timedelta
 from motor.motor_asyncio import AsyncIOMotorDatabase
 import logging
-
 from modules.mongodb_connector import MongoDBConnector
 from configs.mongo_conf import mongo_settings
 from report_tools.base import ReportBaseTool
