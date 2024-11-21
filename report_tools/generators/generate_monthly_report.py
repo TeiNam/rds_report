@@ -52,8 +52,8 @@ async def generate_monthly_report(year: int = None, month: int = None):
         print("\n1. 기간별 통계 수집 완료")
         print(f"- 시작 시점 인스턴스 수: {period_stats['total_instances_start']}")
         print(f"- 종료 시점 인스턴스 수: {period_stats['total_instances_end']}")
-        print(f"- 추가된 인스턴스: {period_stats['instances_added']}개")
-        print(f"- 제거된 인스턴스: {period_stats['instances_removed']}개")
+        print(f"- 추가된 인스턴스: {len(period_stats['instances_added'])}개")
+        print(f"- 제거된 인스턴스: {len(period_stats['instances_removed'])}개")
 
         # 마지막 날짜의 상세 통계 수집
         last_date = datetime.strptime(period_stats['data_range']['end'], "%Y-%m-%d")
@@ -99,16 +99,16 @@ async def generate_monthly_report(year: int = None, month: int = None):
             f.write(f"- 종료 시점 인스턴스 수: {period_stats['total_instances_end']}\n")
             f.write(f"- 순증감: {period_stats['total_instances_end'] - period_stats['total_instances_start']}\n\n")
 
-            if period_stats['added_instances']:
+            if period_stats['instances_added']:
                 f.write("### 신규 생성된 인스턴스\n")
-                for instance in sorted(period_stats['added_instances']):
-                    f.write(f"- {instance}\n")
+                for instance in period_stats['instances_added']:
+                    f.write(f"- {instance['id']} (생성일: {instance['created_at']})\n")
                 f.write("\n")
 
-            if period_stats['removed_instances']:
+            if period_stats['instances_removed']:
                 f.write("### 삭제된 인스턴스\n")
-                for instance in sorted(period_stats['removed_instances']):
-                    f.write(f"- {instance}\n")
+                for instance in period_stats['instances_removed']:
+                    f.write(f"- {instance['id']} (삭제일: {instance['deleted_at']})\n")
                 f.write("\n")
 
         print("\n5. 월간 변경사항 추가 완료")

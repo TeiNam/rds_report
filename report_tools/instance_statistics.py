@@ -222,9 +222,13 @@ class InstanceStatisticsTool(ReportBaseTool):
             first_day_instances = await self._get_instance_ids(collection, first_date)
             last_day_instances = await self._get_instance_ids(collection, last_date)
 
-            # 변경사항 분석
+            # 추가된 인스턴스 생성일자 포함
             added_instances = list(last_day_instances - first_day_instances)
+            added_details = await self._get_instance_creation_dates(collection, added_instances)
+
+            # 제거된 인스턴스 삭제일자 포함
             removed_instances = list(first_day_instances - last_day_instances)
+            removed_details = await self._get_instance_deletion_dates(collection, removed_instances, last_date)
 
             logger.info(f"첫날 ({first_date}) 인스턴스 수: {len(first_day_instances)}")
             logger.info(f"마지막날 ({last_date}) 인스턴스 수: {len(last_day_instances)}")
@@ -236,10 +240,8 @@ class InstanceStatisticsTool(ReportBaseTool):
                 "month": query_start.month,
                 "total_instances_start": len(first_day_instances),
                 "total_instances_end": len(last_day_instances),
-                "instances_added": len(added_instances),
-                "instances_removed": len(removed_instances),
-                "added_instances": sorted(added_instances),
-                "removed_instances": sorted(removed_instances),
+                "instances_added": added_details,
+                "instances_removed": removed_details,
                 "data_range": {
                     "start": first_date,
                     "end": last_date
@@ -249,6 +251,59 @@ class InstanceStatisticsTool(ReportBaseTool):
         except Exception as e:
             logger.error(f"기간별 통계 조회 중 오류 발생: {str(e)}")
             raise
+
+    async def _get_instance_creation_dates(self, collection, instance_ids: List[str]) -> List[Dict[str, Any]]:
+        """추가된 인스턴스의 생성일자 조회"""
+        pipeline = [
+            {"$unwind": "$instances"},
+            {
+                "$match": {
+                    "instances.DBInstanceIdentifier": {"$in": instance_ids}
+                }
+            },
+            {
+                "$group": {
+                    "_id": "$instances.DBInstanceIdentifier",
+                    "InstanceCreateTime": {"$first": "$instances.InstanceCreateTime"}
+                }
+            }
+        ]
+        result = await collection.aggregate(pipeline).to_list(None)
+        return [
+            {
+                "id": r["_id"],
+                "created_at": r["InstanceCreateTime"].split(" ")[0]  # 날짜만 추출
+            }
+            for r in result
+        ]
+
+    async def _get_instance_deletion_dates(self, collection, instance_ids: List[str], last_date: str) -> List[
+        Dict[str, Any]]:
+        """제거된 인스턴스의 삭제일자 조회"""
+        result = []
+        for instance_id in instance_ids:
+            pipeline = [
+                {"$unwind": "$instances"},
+                {
+                    "$match": {
+                        "instances.DBInstanceIdentifier": instance_id,
+                        "timestamp": {"$lte": f"{last_date} 23:59:59"}
+                    }
+                },
+                {"$sort": {"timestamp": -1}},  # 최신 데이터 우선 정렬
+                {"$limit": 1},  # 가장 최근의 데이터만 추출
+                {
+                    "$project": {
+                        "_id": 0,
+                        "id": "$instances.DBInstanceIdentifier",
+                        "deleted_at": {"$substr": ["$timestamp", 0, 10]}  # 날짜만 추출
+                    }
+                }
+            ]
+            query_result = await collection.aggregate(pipeline).to_list(None)
+            if query_result:
+                result.extend(query_result)
+        return result
 
     async def _get_instance_ids(self, collection, date: str) -> Set[str]:
         """특정 날짜의 인스턴스 ID 목록 조회"""
