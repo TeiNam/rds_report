@@ -4,6 +4,8 @@ import os
 import json
 from datetime import datetime, date
 from pathlib import Path
+from calendar import monthrange
+from datetime import date
 from report_tools.instance_statistics import InstanceStatisticsTool
 from report_tools.generators.instance_report import ReportGenerator
 from report_tools.generators.base import BaseReportGenerator
@@ -37,11 +39,7 @@ async def generate_monthly_report(year: int = None, month: int = None):
         generator = MonthlyReportGenerator(year, month)
 
         # 시작일과 종료일 설정
-        start_date = f"{year}-{month:02d}-01"
-        if month == 12:
-            end_date = f"{year + 1}-01-01"
-        else:
-            end_date = f"{year}-{month + 1:02d}-01"
+        start_date, end_date = get_month_date_range(year, month)
 
         print(f"\n=== {year}년 {month}월 RDS 인스턴스 리포트 생성 ===")
         print(f"기간: {start_date} ~ {end_date}")
@@ -119,6 +117,26 @@ async def generate_monthly_report(year: int = None, month: int = None):
     except Exception as e:
         print(f"\n오류 발생: {str(e)}")
         raise
+
+
+def get_month_date_range(year: int, month: int) -> tuple[str, str]:
+    """해당 월의 시작일과 마지막일 반환
+
+    Args:
+        year: 년도
+        month: 월
+
+    Returns:
+        tuple[str, str]: (시작일, 마지막일) - YYYY-MM-DD 형식
+    """
+    # monthrange는 해당 월의 1일의 요일과 총 일수를 반환
+    _, last_day = monthrange(year, month)
+
+    start_date = f"{year}-{month:02d}-01"
+    end_date = f"{year}-{month:02d}-{last_day}"
+
+    return start_date, end_date
+
 
 def get_previous_month(current_date: date = None) -> tuple[int, int]:
     """전월의 년도와 월을 반환

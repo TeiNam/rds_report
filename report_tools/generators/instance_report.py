@@ -5,7 +5,7 @@ import seaborn as sns
 import matplotlib.font_manager as fm
 import os
 from pathlib import Path
-from datetime import date
+from datetime import date, datetime
 from report_tools.generators.base import BaseReportGenerator
 
 
@@ -219,11 +219,18 @@ class ReportGenerator(BaseReportGenerator):
 
     def _create_markdown_report(self, data: Dict[str, Any], output_file: str):
         """마크다운 형식의 리포트 생성"""
-        # 날짜는 데이터에서 가져오기
+        # 날짜는 YYYY-MM 형식으로 변환
         report_date = data.get('date', date.today().strftime("%Y-%m-%d"))
+        try:
+            # 날짜 문자열을 datetime으로 파싱 후 YYYY-MM 형식으로 변환
+            formatted_date = datetime.strptime(report_date, "%Y-%m-%d").strftime("%Y-%m")
+        except:
+            # 파싱 실패 시 현재 날짜를 YYYY-MM 형식으로
+            formatted_date = date.today().strftime("%Y-%m")
+
         total_instances = data['total_instances']
 
-        report_content = f"""# RDS 인스턴스 분석 리포트 ({report_date})
+        report_content = f"""# RDS 인스턴스 분석 리포트 ({formatted_date})
 
 ## 1. 요약
 - 총 인스턴스 수: {total_instances}
