@@ -83,28 +83,41 @@ class MetricVisualizer(BaseReportGenerator):
         """일별 메트릭 데이터 준비"""
         metric_frames = {}
 
+        print("\n=== 일별 메트릭 데이터 준비 ===")
+        print(f"분석 대상 인스턴스: {instance_ids}")
+
         for metric_name in self.TARGET_METRICS:
             data_list = []
 
             for doc in metric_data:
-                metrics = doc.get('metrics', {})
-                for instance_id in instance_ids:
-                    if instance_id not in metrics:
-                        continue
+                instance_id = doc['instance_id']
 
-                    daily_metrics = metrics[instance_id]['daily_metrics']
-                    for date, values in daily_metrics.items():
-                        if metric_name in values:
-                            data_list.append({
-                                'date': datetime.strptime(date, '%Y-%m-%d'),
-                                'instance_id': instance_id,
-                                'value': values[metric_name]['avg']
-                            })
+                # 정확히 일치하는 인스턴스만 처리
+                if instance_id not in instance_ids:
+                    print(f"- {instance_id}: 대상 인스턴스({', '.join(instance_ids)})가 아님")
+                    continue
+
+                print(f"\n처리 중: {doc['year']}년 {doc['month']}월 {instance_id}")
+                daily_metrics = doc.get('daily_metrics', {})
+
+                # 각 날짜별 메트릭 처리
+                for date, metrics in daily_metrics.items():
+                    if metric_name in metrics:
+                        metric_info = metrics[metric_name]
+                        data_list.append({
+                            'date': datetime.strptime(date, '%Y-%m-%d'),
+                            'instance_id': instance_id,
+                            'value': metric_info['avg']
+                        })
+                        print(f"- {date} {metric_name} 데이터 처리 완료")
 
             if data_list:
                 df = pd.DataFrame(data_list)
                 df = df.pivot(index='date', columns='instance_id', values='value')
                 metric_frames[metric_name] = df
+                print(f"\n{metric_name} 데이터프레임 생성 완료:")
+                print(f"- 기간: {df.index.min()} ~ {df.index.max()}")
+                print(f"- 인스턴스: {df.columns.tolist()}")
 
         return metric_frames
 
@@ -116,29 +129,52 @@ class MetricVisualizer(BaseReportGenerator):
         """월별 요약 통계 준비"""
         summary_data = {metric: [] for metric in self.TARGET_METRICS}
 
-        for doc in metric_data:
+        print("\n=== 월별 요약 통계 준비 ===")
+        print(f"입력 데이터 수: {len(metric_data)}개")
+        print(f"분석 대상 인스턴스: {instance_ids}")
+
+        for doc in sorted(metric_data, key=lambda x: (x['year'], x['month'])):
+            instance_id = doc['instance_id']
+
+            # 정확히 일치하는 인스턴스만 처리
+            if instance_id not in instance_ids:
+                print(f"- {instance_id}: 대상 인스턴스({', '.join(instance_ids)})가 아님")
+                continue
+
+            print(f"\n처리 중: {doc['year']}년 {doc['month']}월 {instance_id}")
             year_month = f"{doc['year']}-{doc['month']:02d}"
-            metrics = doc.get('metrics', {})
 
-            for instance_id in instance_ids:
-                if instance_id not in metrics:
-                    continue
+            monthly_summary = doc.get('monthly_summary', {})
+            print(f"- {instance_id} 월간 요약: {list(monthly_summary.keys())}")
 
-                monthly_summary = metrics[instance_id]['monthly_summary']
-                for metric_name in self.TARGET_METRICS:
-                    if metric_name in monthly_summary:
-                        metric_summary = monthly_summary[metric_name]
-                        summary_data[metric_name].append({
-                            'year_month': year_month,
-                            'instance_id': instance_id,
-                            'avg': metric_summary['avg'],
-                            'max': metric_summary['max']['value']
-                        })
+            for metric_name in self.TARGET_METRICS:
+                metric_summary = monthly_summary.get(metric_name, {})
+                if metric_summary:
+                    avg_value = metric_summary.get('avg', 0)
+                    max_value = metric_summary.get('max', {}).get('value', 0)
 
+                    print(f"- {metric_name}: avg={avg_value}, max={max_value}")
+
+                    summary_data[metric_name].append({
+                        'year_month': year_month,
+                        'instance_id': instance_id,
+                        'avg': avg_value,
+                        'max': max_value
+                    })
+                else:
+                    print(f"- {metric_name} 데이터 없음")
+
+        # 결과 데이터 확인
+        print("\n=== 처리된 데이터 ===")
         summary_frames = {}
         for metric_name, data in summary_data.items():
             if data:
                 df = pd.DataFrame(data)
+                print(f"\n{metric_name}:")
+                print(f"- 데이터 수: {len(df)}")
+                if not df.empty:
+                    print(f"- 기간: {df['year_month'].min()} ~ {df['year_month'].max()}")
+                    print(f"- 인스턴스: {sorted(df['instance_id'].unique())}")
                 summary_frames[metric_name] = df
 
         return summary_frames

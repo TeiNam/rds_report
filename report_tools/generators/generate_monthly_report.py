@@ -5,14 +5,15 @@ import json
 import logging
 from calendar import monthrange
 from datetime import date, datetime
+from zoneinfo import ZoneInfo
 from report_tools.instance_statistics import InstanceStatisticsTool
 from report_tools.generators.instance_report import ReportGenerator
 from report_tools.generators.base import BaseReportGenerator
 from report_tools.generators.metric_visualizer import MetricVisualizer
 from report_tools.generators.instance_trend import InstanceTrendGenerator
-from configs.mongo_conf import mongo_settings
 from modules.mongodb_connector import MongoDBConnector
-from zoneinfo import ZoneInfo
+from configs.report_settings import ReportSettings
+from configs.mongo_conf import mongo_settings
 
 logger = logging.getLogger(__name__)
 
@@ -183,16 +184,21 @@ async def generate_monthly_report(year: int = None, month: int = None):
         print("\n6. 월간 변경사항 추가 완료")
 
         # 메트릭 시각화 추가
-        print("\n6. 메트릭 시각화 추가 시작")
-
-        # MetricVisualizer 초기화
-        visualizer = MetricVisualizer(generator.output_dir)
+        print("\n7. 메트릭 시각화 추가 시작")
 
         # MongoDB에서 메트릭 데이터 조회
         db = await MongoDBConnector.get_database()
         collection = db[mongo_settings.MONGO_MONTHLY_CW_RDS_METRIC_COLLECTION]
 
-        # 3개월치 데이터 조회
+        # 대상 인스턴스 정보 가져오기
+        target_instances = ReportSettings.get_report_target_instances()
+        print(f"리포트 대상 인스턴스: {target_instances}")
+
+        if not target_instances:
+            print("분석할 대상 인스턴스가 지정되지 않았습니다.")
+            return
+
+        # 이번 달을 포함한 3개월치 데이터 조회
         metric_data = []
         for m in range(month - 2, month + 1):
             y = year
@@ -203,32 +209,38 @@ async def generate_monthly_report(year: int = None, month: int = None):
                 y += 1
                 m -= 12
 
-            data = await collection.find_one({
-                "env": "prd",  # 환경에 맞게 수정
-                "year": y,
-                "month": m
-            })
-            if data:
-                metric_data.append(data)
+            try:
+                # 정확한 인스턴스 이름으로 필터링
+                cursor = collection.find({
+                    "env": "prd",
+                    "year": y,
+                    "month": m,
+                    "instance_id": {"$in": target_instances}  # 정확한 일치 검사
+                })
+
+                async for doc in cursor:
+                    print(f"- {y}년 {m}월 {doc['instance_id']} 메트릭 데이터 조회 완료")
+                    metric_data.append(doc)
+
+            except Exception as e:
+                logger.error(f"{y}년 {m}월 메트릭 데이터 조회 실패: {e}")
 
         if metric_data:
-            # 대상 인스턴스 목록 (필요에 따라 수정)
-            target_instances = [
-                "dataplatform-airflow-meta",
-                # 다른 인스턴스들 추가
-            ]
+            print(f"총 {len(metric_data)}개월의 메트릭 데이터 조회됨")
 
             # 시각화 생성
+            visualizer = MetricVisualizer(generator.output_dir)
             visualizer.create_metric_visualizations(
-                target_instances,
+                target_instances,  # ReportSettings에서 가져온 목록 사용
                 metric_data,
                 report_file
             )
             print("메트릭 시각화 완료")
         else:
             print("메트릭 데이터가 없습니다")
-
-        print("\n작업이 완료되었습니다!")
+            with open(report_file, "a", encoding="utf-8") as f:
+                f.write("\n## 4. 메트릭 분석\n\n")
+                f.write("> ⚠️ 분석할 메트릭 데이터가 없습니다.\n\n")
 
     except Exception as e:
         print(f"\n오류 발생: {str(e)}")
