@@ -5,7 +5,7 @@ from datetime import datetime
 import os
 from pathlib import Path
 import pandas as pd
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, TextIO
 from .base import BaseReportGenerator
 
 
@@ -267,7 +267,6 @@ class MetricVisualizer(BaseReportGenerator):
         with open(report_file, "a", encoding="utf-8") as f:
             f.write("\n## 4. 상세 메트릭 분석\n\n")
 
-            # 일별 추이 그래프
             for metric_name in self.TARGET_METRICS:
                 title_map = {
                     'CPUUtilization': 'CPU 사용률',
@@ -286,24 +285,98 @@ class MetricVisualizer(BaseReportGenerator):
 
                 if metric_name in monthly_summary:
                     df = monthly_summary[metric_name]
-                    f.write("#### 월별 통계\n\n")
-                    f.write("| 인스턴스 | 연월 | 평균 | 최대값 |\n")
-                    f.write("|----------|------|------|--------|\n")
+                    if not df.empty:
+                        self._write_monthly_statistics(f, metric_name, df)
 
-                    # 각 인스턴스별로 정렬된 데이터 출력
-                    for instance_id in df['instance_id'].unique():
-                        instance_data = df[df['instance_id'] == instance_id].sort_values('year_month')
+    def _write_monthly_statistics(
+            self,
+            f: TextIO,
+            metric_name: str,
+            df: pd.DataFrame
+    ):
+        """월별 통계 테이블 작성"""
+        f.write("#### 월별 통계\n\n")
 
-                        # 단위 변환 함수 (네트워크 메트릭의 경우)
-                        def format_value(value, metric):
-                            if 'NetworkReceiveThroughput' in metric or 'NetworkTransmitThroughput' in metric:
-                                # bytes/s를 MB/s로 변환
-                                return f"{value / (1024 * 1024):.2f}"
-                            return f"{value:.2f}"
+        # 1. 인스턴스 그룹별로 데이터 정리
+        instance_groups = self._group_instances(df['instance_id'].unique())
 
-                        for _, row in instance_data.iterrows():
-                            avg = format_value(row['avg'], metric_name)
-                            max_val = format_value(row['max'], metric_name)
-                            f.write(f"| {row['instance_id']} | {row['year_month']} | {avg} | {max_val} |\n")
+        # 2. 각 그룹별로 테이블 생성
+        for group_name, instances in instance_groups.items():
+            if instances:  # 그룹에 인스턴스가 있는 경우만 처리
+                f.write(f"**{group_name}**\n\n")
+                self._write_group_table(f, df, instances, metric_name)
+                f.write("\n")  # 그룹 간 간격 추가
 
-                        f.write("\n")
+    def _group_instances(self, instance_ids: List[str]) -> Dict[str, List[str]]:
+        """인스턴스를 그룹화"""
+        groups = {
+            "프로덕션 서비스": [],
+            "읽기 전용 인스턴스": [],
+            "기타 인스턴스": []
+        }
+
+        for instance_id in sorted(instance_ids):
+            if instance_id.startswith("prd-") and "read" in instance_id:
+                groups["읽기 전용 인스턴스"].append(instance_id)
+            elif not instance_id.startswith("prd-"):
+                groups["프로덕션 서비스"].append(instance_id)
+            else:
+                groups["기타 인스턴스"].append(instance_id)
+
+        return {k: v for k, v in groups.items() if v}  # 비어있지 않은 그룹만 반환
+
+    def _write_group_table(
+            self,
+            f: TextIO,
+            df: pd.DataFrame,
+            instances: List[str],
+            metric_name: str
+    ):
+        """그룹별 테이블 작성"""
+        # 1. 전체 인스턴스 이름의 최대 길이 계산
+        max_instance_length = max(len(instance_id) for instance_id in instances)
+
+        # 2. 테이블 헤더 작성
+        f.write(f"| {'인스턴스'.ljust(max_instance_length)} | 연월 | 평균 | 최대값 |\n")
+        f.write(
+            f"|{''.center(max_instance_length + 2, '-')}|{''.center(7, '-')}|{''.center(8, '-')}|{''.center(8, '-')}|\n")
+
+        # 3. 각 인스턴스별로 정렬된 데이터 출력
+        for instance_id in instances:
+            instance_data = df[df['instance_id'] == instance_id].sort_values('year_month')
+
+            for _, row in instance_data.iterrows():
+                avg_value = self._format_metric_value(row['avg'], metric_name)
+                max_value = self._format_metric_value(row['max'], metric_name)
+
+                f.write(
+                    f"| {instance_id.ljust(max_instance_length)} "  # 인스턴스 ID (좌측 정렬)
+                    f"| {row['year_month']} "  # 연월
+                    f"| {avg_value:>6} "  # 평균 (우측 정렬)
+                    f"| {max_value:>6} |\n"  # 최대값 (우측 정렬)
+                )
+
+    def _format_metric_value(self, value: float, metric_name: str) -> str:
+        """메트릭 값 포맷팅"""
+        if 'NetworkReceiveThroughput' in metric_name or 'NetworkTransmitThroughput' in metric_name:
+            # bytes/s를 MB/s로 변환하고 소수점 2자리까지 표시
+            return f"{value / (1024 * 1024):.2f}"
+        return f"{value:.2f}"
+
+    def _format_cell_content(
+            self,
+            content: str,
+            max_length: int,
+            align: str = 'left'
+    ) -> str:
+        """셀 내용 포맷팅"""
+        content = str(content)
+        if len(content) > max_length:
+            content = content[:max_length - 3] + '...'
+        else:
+            padding = max_length - len(content)
+            if align == 'right':
+                content = ' ' * padding + content
+            else:
+                content = content + ' ' * padding
+        return content
