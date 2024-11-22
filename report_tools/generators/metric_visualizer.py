@@ -325,36 +325,113 @@ class MetricVisualizer(BaseReportGenerator):
 
         return {k: v for k, v in groups.items() if v}  # 비어있지 않은 그룹만 반환
 
-    def _write_group_table(
+    def _write_monthly_statistics(
             self,
             f: TextIO,
-            df: pd.DataFrame,
-            instances: List[str],
-            metric_name: str
+            metric_name: str,
+            df: pd.DataFrame
     ):
-        """그룹별 테이블 작성"""
-        # 1. 전체 인스턴스 이름의 최대 길이 계산
-        max_instance_length = max(len(instance_id) for instance_id in instances)
+        """월별 통계 테이블 작성"""
+        f.write("#### 월별 통계\n\n")
 
-        # 2. 테이블 헤더 작성
-        f.write(f"| {'인스턴스'.ljust(max_instance_length)} | 연월 | 평균 | 최대값 |\n")
-        f.write(
-            f"|{''.center(max_instance_length + 2, '-')}|{''.center(7, '-')}|{''.center(8, '-')}|{''.center(8, '-')}|\n")
+        # 1. 인스턴스 그룹별로 데이터 정리
+        instance_groups = self._group_instances(df['instance_id'].unique())
 
-        # 3. 각 인스턴스별로 정렬된 데이터 출력
-        for instance_id in instances:
-            instance_data = df[df['instance_id'] == instance_id].sort_values('year_month')
+        # 2. 각 그룹별로 테이블 생성
+        for group_name, instances in instance_groups.items():
+            if not instances:  # 그룹에 인스턴스가 없는 경우 스킵
+                continue
 
-            for _, row in instance_data.iterrows():
-                avg_value = self._format_metric_value(row['avg'], metric_name)
-                max_value = self._format_metric_value(row['max'], metric_name)
+            f.write(f"**{group_name}**\n\n")
 
-                f.write(
-                    f"| {instance_id.ljust(max_instance_length)} "  # 인스턴스 ID (좌측 정렬)
-                    f"| {row['year_month']} "  # 연월
-                    f"| {avg_value:>6} "  # 평균 (우측 정렬)
-                    f"| {max_value:>6} |\n"  # 최대값 (우측 정렬)
-                )
+            # 해당 그룹의 모든 데이터 준비
+            for instance_id in instances:
+                instance_data = df[df['instance_id'] == instance_id].sort_values('year_month')
+
+                # 월별 데이터 매핑
+                months_data = {}
+                prev_avg = None
+                prev_max = None
+
+                for _, row in instance_data.iterrows():
+                    month = int(row['year_month'].split('-')[1])
+                    current_avg = float(row['avg'])
+                    current_max = float(row['max'])
+
+                    # 변동폭 계산
+                    avg_change = None if prev_avg is None else current_avg - prev_avg
+                    max_change = None if prev_max is None else current_max - prev_max
+
+                    months_data[month] = {
+                        'avg': current_avg,
+                        'max': current_max,
+                        'avg_change': avg_change,
+                        'max_change': max_change
+                    }
+
+                    prev_avg = current_avg
+                    prev_max = current_max
+
+                # 헤더 작성
+                header = "| 분류 | 인스턴스 |"
+                separator = "|------|----------|"
+
+                # 존재하는 월 데이터 확인 및 컬럼 너비 설정
+                months = sorted(months_data.keys())
+                for month in months:
+                    header += f" {month}월 |"
+                    separator += "-------------|"
+
+                f.write(f"{header}\n")
+                f.write(f"{separator}\n")
+
+                # 평균값 행
+                avg_row = "| 평균 | "
+                avg_row += f"{instance_id} |"
+                for month in months:
+                    value = months_data[month]['avg']
+                    change = months_data[month]['avg_change']
+
+                    formatted_value = self._format_metric_value(value, metric_name)
+                    change_text = self._format_change(change, metric_name) if change is not None else ""
+
+                    avg_row += f" {formatted_value:>6} {change_text} |"
+                f.write(f"{avg_row}\n")
+
+                # 최대값 행
+                max_row = "| 최대값 | "
+                max_row += f"{instance_id} |"
+                for month in months:
+                    value = months_data[month]['max']
+                    change = months_data[month]['max_change']
+
+                    formatted_value = self._format_metric_value(value, metric_name)
+                    change_text = self._format_change(change, metric_name) if change is not None else ""
+
+                    max_row += f" {formatted_value:>6} {change_text} |"
+                f.write(f"{max_row}\n")
+
+                f.write("\n")  # 인스턴스 간 간격 추가
+
+    def _format_change(self, change: float, metric_name: str) -> str:
+        """변동폭 포맷팅"""
+        if change is None:
+            return ""
+
+        # 네트워크 메트릭의 경우 MB/s로 변환
+        if 'NetworkReceiveThroughput' in metric_name or 'NetworkTransmitThroughput' in metric_name:
+            change = change / (1024 * 1024)
+
+        # 변동폭이 0이면 빈 문자열 반환
+        if abs(change) < 0.01:
+            return ""
+
+        formatted_change = f"{abs(change):.2f}"
+
+        if change > 0:
+            return f" (🔺{formatted_change})"  # 빨간색
+        else:
+            return f" (🔻{formatted_change})"  # 파란색
 
     def _format_metric_value(self, value: float, metric_name: str) -> str:
         """메트릭 값 포맷팅"""
