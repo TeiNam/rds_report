@@ -429,9 +429,9 @@ class MetricVisualizer(BaseReportGenerator):
         formatted_change = f"{abs(change):.2f}"
 
         if change > 0:
-            return f" (🔺{formatted_change})"  # 빨간색
+            return f" (<span style='color: #FF4B4B'>▲{formatted_change}</span>)"  # 빨간색
         else:
-            return f" (🔻{formatted_change})"  # 파란색
+            return f" (<span style='color: #4B8AFC'>▼{formatted_change}</span>)"  # 파란색
 
     def _format_metric_value(self, value: float, metric_name: str) -> str:
         """메트릭 값 포맷팅"""
