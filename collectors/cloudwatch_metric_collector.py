@@ -435,10 +435,10 @@ class RDSCloudWatchCollector:
             month: int
     ) -> None:
         """
-        월간 메트릭 데이터를 MongoDB에 저장 (계정별 도큐먼트)
+        월간 메트릭 데이터를 MongoDB에 저장 (인스턴스별 도큐먼트)
 
         Args:
-            account_metrics: 계정별 메트릭 데이터
+            account_metrics: 계정별, 인스턴스별 메트릭 데이터
             year: 수집 연도
             month: 수집 월
         """
@@ -446,40 +446,65 @@ class RDSCloudWatchCollector:
             db = await MongoDBConnector.get_database()
             collection = db[self.collection_name]
 
-            # 각 계정별로 하나의 도큐먼트로 저장
+            # 인스턴스별로 저장
             for account_id, metrics in account_metrics.items():
-                document = {
-                    "env": self._instance_info.env,
-                    "year": year,
-                    "month": month,
-                    "account_id": account_id,
-                    "metrics": {
-                        instance_id: {
-                            "daily_metrics": daily_metrics,
-                            "monthly_summary": self._calculate_monthly_summary(daily_metrics)
-                        }
-                        for instance_id, daily_metrics in metrics.items()
-                    },
-                    "created_at": datetime.now(kst).isoformat()
-                }
+                for instance_id, daily_metrics in metrics.items():
+                    # 일별 메트릭 데이터 구조화
+                    structured_daily_metrics = {}
+                    for date, date_metrics in daily_metrics.items():
+                        # 메트릭별 데이터 정리
+                        metric_values = {}
+                        for metric_name, metric_data in date_metrics.items():
+                            metric_values[metric_name] = metric_data
 
-                # 계정별 도큐먼트 upsert
-                filter_doc = {
-                    "env": document["env"],
-                    "year": year,
-                    "month": month,
-                    "account_id": account_id
-                }
+                        structured_daily_metrics[date] = metric_values
 
-                await collection.update_one(
-                    filter_doc,
-                    {"$set": document},
-                    upsert=True
-                )
+                    # 월간 요약 통계
+                    monthly_summary = self._calculate_monthly_summary(daily_metrics)
+
+                    # 도큐먼트 생성
+                    document = {
+                        "env": self._instance_info.env,
+                        "year": year,
+                        "month": month,
+                        "account_id": account_id,
+                        "instance_id": instance_id,
+                        "daily_metrics": structured_daily_metrics,
+                        "monthly_summary": monthly_summary,
+                        "created_at": datetime.now(kst).isoformat()
+                    }
+
+                    # 인스턴스별 도큐먼트 upsert
+                    filter_doc = {
+                        "env": document["env"],
+                        "year": year,
+                        "month": month,
+                        "account_id": account_id,
+                        "instance_id": instance_id
+                    }
+
+                    try:
+                        result = await collection.update_one(
+                            filter_doc,
+                            {"$set": document},
+                            upsert=True
+                        )
+
+                        operation = "업데이트" if result.modified_count else "생성"
+                        logger.info(
+                            f"인스턴스 {instance_id}의 "
+                            f"{year}년 {month}월 메트릭 도큐먼트 {operation} 완료"
+                        )
+
+                    except Exception as e:
+                        logger.error(
+                            f"인스턴스 {instance_id} 메트릭 저장 실패: {str(e)}"
+                        )
+                        continue
 
                 logger.info(
                     f"계정 {account_id}의 "
-                    f"{year}년 {month}월 메트릭 저장 완료 "
+                    f"{year}년 {month}월 전체 메트릭 저장 완료 "
                     f"({len(metrics)}개 인스턴스)"
                 )
 
@@ -500,7 +525,11 @@ class RDSCloudWatchCollector:
         monthly_summary = {}
 
         # 각 메트릭 유형별로 처리
-        for metric_name in set().union(*(day_metrics.keys() for day_metrics in daily_metrics.values())):
+        metric_types = set()
+        for day_metrics in daily_metrics.values():
+            metric_types.update(day_metrics.keys())
+
+        for metric_name in metric_types:
             metric_values = []
             max_value = float('-inf')
             min_value = float('inf')
@@ -537,7 +566,7 @@ class RDSCloudWatchCollector:
                         'timestamp': min_timestamp
                     },
                     'avg': float(sum(metric_values) / len(metric_values)),
-                    'days_collected': len(metric_values)  # 데이터가 수집된 일수
+                    'days_collected': len(metric_values)
                 }
 
         return monthly_summary
