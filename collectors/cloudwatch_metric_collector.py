@@ -28,6 +28,8 @@ class RDSCloudWatchCollector:
         self.session_manager = session_manager
         self.settings = CloudWatchSettings()
         self._instance_info = self.session_manager.get_instance_info()
+        self._metric_cache = {}
+        self._cache_ttl = 3600  # 캐시 유효시간 (1시간)
 
     @property
     def collection_name(self) -> str:
@@ -309,20 +311,18 @@ class RDSCloudWatchCollector:
             date: datetime,
             is_test: bool = False
     ) -> Optional[Dict[str, Any]]:
-        """
-        CloudWatch 메트릭 데이터 조회
-
-        Args:
-            cloudwatch: CloudWatch 클라이언트
-            metric_name: 메트릭 이름
-            instance_id: 인스턴스 식별자
-            date: 조회 대상 날짜
-            is_test: 테스트 모드 여부
-
-        Returns:
-            Optional[Dict[str, Any]]: 메트릭 데이터
-        """
+        """CloudWatch 메트릭 데이터 조회 (캐시 적용)"""
         try:
+            # 캐시 키 생성
+            cache_key = f"{instance_id}:{metric_name}:{date.strftime('%Y-%m-%d')}"
+
+            # 캐시 확인
+            cached_data = self._metric_cache.get(cache_key)
+            if cached_data:
+                cache_time, data = cached_data
+                if (datetime.now() - cache_time).total_seconds() < self._cache_ttl:
+                    return data
+
             # KST -> UTC 변환
             start_time_kst = datetime.combine(date.date(), time.min).replace(tzinfo=kst)
             end_time_kst = datetime.combine(date.date(), time.max).replace(tzinfo=kst)
@@ -342,7 +342,7 @@ class RDSCloudWatchCollector:
                 Dimensions=dimensions,
                 StartTime=start_time_utc,
                 EndTime=end_time_utc,
-                Period=86400,  # 1일
+                Period=86400,
                 Statistics=['Average', 'Maximum', 'Minimum']
             )
 
@@ -354,7 +354,14 @@ class RDSCloudWatchCollector:
                     )
                 return None
 
-            return self._calculate_statistics(response['Datapoints'])
+            # 통계 계산
+            result = self._calculate_statistics(response['Datapoints'])
+
+            # 결과 캐싱
+            if result:
+                self._metric_cache[cache_key] = (datetime.now(), result)
+
+            return result
 
         except ClientError as e:
             error_code = e.response['Error']['Code']
@@ -371,6 +378,20 @@ class RDSCloudWatchCollector:
                     f"(메트릭: {metric_name}, 인스턴스: {instance_id}): {e}"
                 )
             return None
+
+    def clear_cache(self):
+        """캐시 초기화"""
+        self._metric_cache.clear()
+
+    def remove_expired_cache(self):
+        """만료된 캐시 제거"""
+        now = datetime.now()
+        expired_keys = [
+            key for key, (cache_time, _) in self._metric_cache.items()
+            if (now - cache_time).total_seconds() >= self._cache_ttl
+        ]
+        for key in expired_keys:
+            del self._metric_cache[key]
 
     def _calculate_statistics(
             self,

@@ -421,3 +421,83 @@ class MongoDBConnector:
             except Exception as e:
                 logger.error(f"예상치 못한 오류 발생: {e}")
                 raise
+
+    @classmethod
+    @ensure_connection
+    async def bulk_write_with_retry(
+            cls: Type[T],
+            collection: str,
+            operations: List[Dict[str, Any]],
+            max_retries: int = 3,
+            ordered: bool = True
+    ) -> Dict[str, Any]:
+        """
+        재시도 로직이 포함된 벌크 작업 수행
+
+        Args:
+            collection: 컬렉션 이름
+            operations: 벌크 작업 목록
+            max_retries: 최대 재시도 횟수
+            ordered: 순서 보장 여부
+
+        Returns:
+            Dict[str, Any]: 벌크 작업 결과
+
+        Raises:
+            OperationFailure: 최대 재시도 횟수 초과 시
+        """
+        last_error = None
+        for attempt in range(max_retries):
+            try:
+                return await cls.bulk_write(collection, operations, ordered)
+
+            except OperationFailure as e:
+                last_error = e
+                if attempt == max_retries - 1:
+                    logger.error(f"벌크 작업 최대 재시도 횟수 초과: {str(e)}")
+                    raise
+
+                await asyncio.sleep(2 ** attempt)  # 지수 백오프
+                logger.warning(f"벌크 작업 재시도 {attempt + 1}/{max_retries}")
+                continue
+
+            except Exception as e:
+                logger.error(f"예상치 못한 오류 발생: {str(e)}")
+                raise
+
+    @classmethod
+    @ensure_connection
+    async def aggregate_with_batch(
+            cls: Type[T],
+            collection: str,
+            pipeline: List[Dict[str, Any]],
+            batch_size: int = 1000
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """
+        배치 처리를 통한 대용량 집계 수행
+
+        Args:
+            collection: 컬렉션 이름
+            pipeline: 집계 파이프라인
+            batch_size: 배치 크기
+
+        Yields:
+            Dict[str, Any]: 집계 결과
+        """
+        try:
+            # allowDiskUse=True로 메모리 제한 회피
+            cursor = cls._db[collection].aggregate(
+                pipeline,
+                allowDiskUse=True,
+                batchSize=batch_size
+            )
+
+            async for doc in cursor:
+                yield doc
+
+        except OperationFailure as e:
+            logger.error(f"집계 작업 실패: {str(e)}")
+            raise
+        except Exception as e:
+            logger.error(f"예상치 못한 오류 발생: {str(e)}")
+            raise
