@@ -2,15 +2,19 @@
 import asyncio
 import os
 import json
+import logging
 from calendar import monthrange
 from datetime import date, datetime
 from report_tools.instance_statistics import InstanceStatisticsTool
 from report_tools.generators.instance_report import ReportGenerator
 from report_tools.generators.base import BaseReportGenerator
+from report_tools.generators.metric_visualizer import MetricVisualizer
+from report_tools.generators.instance_trend import InstanceTrendGenerator
 from configs.mongo_conf import mongo_settings
 from modules.mongodb_connector import MongoDBConnector
 from zoneinfo import ZoneInfo
 
+logger = logging.getLogger(__name__)
 
 class MonthlyReportGenerator(BaseReportGenerator):
     """월간 리포트 생성기"""
@@ -117,7 +121,113 @@ async def generate_monthly_report(year: int = None, month: int = None):
                     f.write(f"- {instance['id']} (삭제일: {instance['deleted_at']})\n")
                 f.write("\n")
 
+        print("\n6-2. 인스턴스 변동 현황 추가 시작")
+        trend_data = []
+
+        # MongoDB에서 3개월치 데이터 조회
+        trend_data = []
+        # MongoDB 데이터베이스 연결
+        db = await MongoDBConnector.get_database()
+
+        # 컬렉션 이름 동적으로 설정
+        collection_name = mongo_settings.MONGO_MONTHLY_INSTANCE_STATISTICS_COLLECTION
+        collection = db[collection_name]
+
+        for m in range(month - 2, month + 1):
+            y = year
+            if m <= 0:
+                y -= 1
+                m += 12
+            elif m > 12:
+                y += 1
+                m -= 12
+
+            try:
+                data = await collection.find_one(
+                    {
+                        "year": y,
+                        "month": m
+                    },
+                    {
+                        "year": 1,
+                        "month": 1,
+                        "statistics": {
+                            "total_instances": 1,
+                            "period_statistics": {
+                                "instances_added": 1,
+                                "instances_removed": 1
+                            }
+                        }
+                    }
+                )
+                if data:
+                    trend_data.append(data)
+            except Exception as e:
+                logger.error(f"{y}년 {m}월 데이터 조회 실패: {e}")
+
+        if trend_data:
+            print(f"- {len(trend_data)}개월 데이터 조회 완료")
+            # 날짜순 정렬
+            trend_data.sort(key=lambda x: (x['year'], x['month']))
+
+            # 변동 추이 생성기 초기화 및 실행
+            trend_generator = InstanceTrendGenerator(generator.output_dir)
+            trend_generator.append_trend_section(target_file, trend_data)
+            print("- 변동 추이 분석 추가 완료")
+        else:
+            logger.warning("변동 추이를 분석할 데이터가 없습니다")
+            with open(target_file, "a", encoding="utf-8") as f:
+                f.write("\n### 3. 인스턴스 변동 추이\n\n")
+                f.write("> ⚠️ 분석할 데이터가 없습니다.\n\n")
+
         print("\n6. 월간 변경사항 추가 완료")
+
+        # 메트릭 시각화 추가
+        print("\n6. 메트릭 시각화 추가 시작")
+
+        # MetricVisualizer 초기화
+        visualizer = MetricVisualizer(generator.output_dir)
+
+        # MongoDB에서 메트릭 데이터 조회
+        db = await MongoDBConnector.get_database()
+        collection = db[mongo_settings.MONGO_MONTHLY_CW_RDS_METRIC_COLLECTION]
+
+        # 3개월치 데이터 조회
+        metric_data = []
+        for m in range(month - 2, month + 1):
+            y = year
+            if m <= 0:
+                y -= 1
+                m += 12
+            elif m > 12:
+                y += 1
+                m -= 12
+
+            data = await collection.find_one({
+                "env": "prd",  # 환경에 맞게 수정
+                "year": y,
+                "month": m
+            })
+            if data:
+                metric_data.append(data)
+
+        if metric_data:
+            # 대상 인스턴스 목록 (필요에 따라 수정)
+            target_instances = [
+                "dataplatform-airflow-meta",
+                # 다른 인스턴스들 추가
+            ]
+
+            # 시각화 생성
+            visualizer.create_metric_visualizations(
+                target_instances,
+                metric_data,
+                report_file
+            )
+            print("메트릭 시각화 완료")
+        else:
+            print("메트릭 데이터가 없습니다")
+
         print("\n작업이 완료되었습니다!")
 
     except Exception as e:
