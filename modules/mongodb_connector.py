@@ -179,8 +179,7 @@ class MongoDBConnector:
         """연결 종료 및 리소스 정리"""
         if cls._client:
             try:
-                cls._client.close()
-                await cls._client.wait_closed()
+                cls._client.close()  # wait_closed 대신 일반 close 사용
                 logger.info("MongoDB 연결이 정상적으로 종료되었습니다.")
             except Exception as e:
                 logger.error(f"MongoDB 연결 종료 중 오류 발생: {e}")
