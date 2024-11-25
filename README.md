@@ -4,6 +4,15 @@
 - 로컬 SSO 사용
 - Ec2 IAM 권한 사용
 
+## 환경설정
+```dotenv
+MONGODB_URI=""
+MONGODB_DB_NAME=mgmt_db
+
+## 리포트 대상 인스턴스 지정
+REPORT_TARGET_INSTANCES=["","",""]
+```
+
 ### 프로젝트의 소스 코드 트리 구조
 ```angular2html
 rds_report/
