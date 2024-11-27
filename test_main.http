@@ -81,3 +81,18 @@ GET {{baseUrl}}/v1/reports/monthly/metrics
     ?year=2024
     &month=10
     &env=dev
+
+### RDS 월간 리포트 생성 (특정 월)
+POST http://localhost:8000/api/v1/reports/generate
+Content-Type: application/json
+
+{
+    "year": 2024,
+    "month": 10
+}
+
+### RDS 월간 리포트 생성 (전월)
+POST http://localhost:8000/api/v1/reports/generate
+Content-Type: application/json
+
+{}
