@@ -38,7 +38,7 @@ class MonthlyReportGenerator(BaseReportGenerator):
         self.report_date = target_date
 
 
-async def generate_monthly_report(year: int = None, month: int = None):
+async def generate_monthly_report(year: int = None, month: int = None) -> dict:
     """월간 인스턴스 리포트 생성"""
     try:
         # 리포트 생성기 초기화
@@ -241,6 +241,21 @@ async def generate_monthly_report(year: int = None, month: int = None):
             with open(report_file, "a", encoding="utf-8") as f:
                 f.write("\n## 4. 메트릭 분석\n\n")
                 f.write("> ⚠️ 분석할 메트릭 데이터가 없습니다.\n\n")
+
+        # 리포트 파일 경로
+        report_date = f"{year}{month:02d}"
+        target_file = generator.get_report_path(f"rds_report_{report_date}.md")
+
+        # 처리 결과 반환
+        return {
+            "output_dir": generator.output_dir,
+            "report_file": target_file,
+            "report_date": report_date,
+            "period": {
+                "start_date": start_date,
+                "end_date": end_date
+            }
+        }
 
     except Exception as e:
         print(f"\n오류 발생: {str(e)}")

@@ -6,11 +6,11 @@ from collectors.cloudwatch_metric_collector import RDSCloudWatchCollector
 from modules.aws_session_manager import AWSSessionManager
 import logging
 
-router = APIRouter(prefix="/reports/monthly", tags=["reports"])
+router = APIRouter(prefix="/reports/gather", tags=["reports"])
 logger = logging.getLogger(__name__)
 
 
-@router.get("/metrics")
+@router.get("/cw_metrics")
 async def collect_monthly_metrics(
         year: int = Query(..., description="수집 연도"),
         month: int = Query(..., ge=1, le=12, description="수집 월 (1-12)"),
