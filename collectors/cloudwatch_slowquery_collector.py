@@ -717,7 +717,7 @@ if __name__ == "__main__":
     # 월간 수집
     MANUAL_DATE = None
     MANUAL_MODE = "monthly"
-    MANUAL_PERIOD = "2024-10"
+    MANUAL_PERIOD = "2024-11"
 
     # MANUAL_DATE = None          # 수동 설정을 사용하지 않을 때는 None으로 설정
     # MANUAL_MODE = None

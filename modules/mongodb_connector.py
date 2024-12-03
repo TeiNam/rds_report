@@ -48,7 +48,7 @@ class MongoDBConnector:
     def _get_default_settings(cls) -> Dict[str, Any]:
         """기본 MongoDB 설정을 반환"""
         return {
-            'tls': False,
+            'tls': True,
             'tlsAllowInvalidCertificates': True,
             'tlsAllowInvalidHostnames': True,
             'directConnection': False,
