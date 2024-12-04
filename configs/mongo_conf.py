@@ -31,6 +31,9 @@ class MongoSettings(BaseSettings):
     MONGO_SLOW_QUERY_COLLECTION: str = os.getenv(
         "MONGO_SLOW_QUERY_COLLECTION", "slow_queries"
     )
+    MONGO_MONTHLY_SLOW_STATISTICS_COLLECTION: str = os.getenv(
+        "MONGO_MONTHLY_SLOW_STATISTICS_COLLECTION", "monthly_slow_statistics"
+    )
 
     class Config:
         env_file = ".env"

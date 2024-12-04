@@ -2,6 +2,8 @@ from typing import Dict, List
 from collections import defaultdict
 from datetime import datetime
 from slowquery_tools.loaders.stats_loader import get_stats_loader
+from slowquery_tools.stores.slow_query_statistics_store import SlowQueryStatisticsStore
+from modules.mongodb_connector import MongoDBConnector
 import sqlparse
 import logging
 
@@ -12,27 +14,54 @@ class MonthlySlowQueryAnalyzer:
     def __init__(self):
         self.stats_loader = get_stats_loader()
 
+    async def analyze_and_store_all_instances(
+            self,
+            instances: List[str],
+            year: int,
+            month: int
+    ) -> None:
+        """모든 인스턴스의 통계 분석 및 저장"""
+        try:
+            # MongoDB 초기화
+            await MongoDBConnector.initialize()
+            await SlowQueryStatisticsStore.initialize_collection()
+
+            for instance_id in instances:
+                print(f"\n{'=' * 50}")
+                print(f"인스턴스 {instance_id} 분석 및 저장")
+                print(f"{'=' * 50}")
+
+                try:
+                    # 통계 분석 수행
+                    stats = await self.analyze_monthly_stats(instance_id, year, month)
+
+                    if stats:
+                        # MongoDB에 저장
+                        await SlowQueryStatisticsStore.store_statistics(
+                            instance_id, year, month, stats
+                        )
+                        await self.print_analysis_results(stats)
+                    else:
+                        print(f"\n{year}년 {month}월 데이터가 없습니다.")
+
+                except Exception as e:
+                    logger.error(f"인스턴스 {instance_id} 처리 중 오류 발생: {str(e)}")
+                    continue
+
+        except Exception as e:
+            logger.error(f"전체 처리 중 오류 발생: {str(e)}")
+            raise
+
+        finally:
+            await MongoDBConnector.close()
+
     async def analyze_monthly_stats(
             self,
             instance_id: str,
             year: int,
             month: int
     ) -> Dict:
-        """월간 슬로우 쿼리 통계 분석
-
-        Args:
-            instance_id: RDS 인스턴스 ID
-            year: 분석 년도
-            month: 분석 월
-
-        Returns:
-            Dict: 월간 통계 분석 결과
-            {
-                'total_stats': 전체 통계,
-                'user_stats': 사용자별 통계,
-                'digest_stats': 다이제스트별 통계
-            }
-        """
+        """월간 슬로우 쿼리 통계 분석"""
         try:
             # 월간 데이터 조회
             queries = await self.stats_loader.get_instance_queries(
@@ -171,63 +200,59 @@ class MonthlySlowQueryAnalyzer:
             )
         ]
 
+    async def print_analysis_results(self, stats: Dict) -> None:
+        """분석 결과 출력"""
+        if not stats:
+            print("\n데이터가 없습니다.")
+            return
 
-async def print_monthly_analysis(instance_id: str, year: int, month: int):
-    """월간 분석 결과 출력"""
-    analyzer = MonthlySlowQueryAnalyzer()
-    stats = await analyzer.analyze_monthly_stats(instance_id, year, month)
+        # 전체 통계 출력
+        print("\n=== 전체 통계 ===")
+        total = stats['total_stats']
+        print(f"고유 다이제스트 수: {total['unique_digest_count']:,}")
+        print(f"전체 슬로우 쿼리 수: {total['total_slow_queries']:,}")
+        print(f"전체 실행 횟수: {total['total_execution_count']:,}")
+        print(f"전체 실행 시간: {total['total_execution_time']:.2f}초")
+        print(f"평균 실행 시간: {total['avg_execution_time']:.3f}초")
+        print(f"전체 조회 행 수: {total['total_examined_rows']:,}")
+        print("쿼리 타입별 통계:")
+        print(f"  읽기 쿼리 (SELECT): {total['read_queries']:,}")
+        print(f"  쓰기 쿼리 (INSERT/UPDATE/DELETE): {total['write_queries']:,}")
+        print(f"  DDL 쿼리 (ALTER): {total['ddl_queries']:,}")
 
-    if not stats:
-        print(f"\n{year}년 {month}월 데이터가 없습니다.")
-        return
+        # 사용자별 통계 출력
+        print("\n=== 사용자별 통계 ===")
+        for user_stat in stats['user_stats']:
+            print(f"\n사용자: {user_stat['user']}")
+            print(f"  고유 다이제스트 수: {user_stat['unique_digest_count']:,}")
+            print(f"  슬로우 쿼리 수: {user_stat['slow_query_count']:,}")
+            print(f"  전체 실행 횟수: {user_stat['total_execution_count']:,}")
+            print(f"  전체 실행 시간: {user_stat['total_execution_time']:.2f}초")
+            print(f"  평균 실행 시간: {user_stat['avg_execution_time']:.3f}초")
+            print(f"  전체 조회 행 수: {user_stat['total_examined_rows']:,}")
 
-    # 전체 통계 출력
-    print("\n=== 전체 통계 ===")
-    total = stats['total_stats']
-    print(f"고유 다이제스트 수: {total['unique_digest_count']:,}")
-    print(f"전체 슬로우 쿼리 수: {total['total_slow_queries']:,}")
-    print(f"전체 실행 횟수: {total['total_execution_count']:,}")
-    print(f"전체 실행 시간: {total['total_execution_time']:.2f}초")
-    print(f"평균 실행 시간: {total['avg_execution_time']:.3f}초")
-    print(f"전체 조회 행 수: {total['total_examined_rows']:,}")
-    print("쿼리 타입별 통계:")
-    print(f"  읽기 쿼리 (SELECT): {total['read_queries']:,}")
-    print(f"  쓰기 쿼리 (INSERT/UPDATE/DELETE): {total['write_queries']:,}")
-    print(f"  DDL 쿼리 (ALTER): {total['ddl_queries']:,}")
-
-    # 사용자별 통계 출력
-    print("\n=== 사용자별 통계 ===")
-    for user_stat in stats['user_stats']:
-        print(f"\n사용자: {user_stat['user']}")
-        print(f"  고유 다이제스트 수: {user_stat['unique_digest_count']:,}")
-        print(f"  슬로우 쿼리 수: {user_stat['slow_query_count']:,}")
-        print(f"  전체 실행 횟수: {user_stat['total_execution_count']:,}")
-        print(f"  전체 실행 시간: {user_stat['total_execution_time']:.2f}초")
-        print(f"  평균 실행 시간: {user_stat['avg_execution_time']:.3f}초")
-        print(f"  전체 조회 행 수: {user_stat['total_examined_rows']:,}")
-
-    # 상위 10개 다이제스트 통계 출력
-    print("\n=== 상위 10개 다이제스트 통계 ===")
-    for i, digest in enumerate(stats['digest_stats'][:10], 1):
-        print(f"\n{i}. 다이제스트:")
-        # SQL 포맷팅
-        formatted_sql = sqlparse.format(
-            digest['digest_query'],
-            reindent=True,
-            keyword_case='upper',
-            indent_width=2
-        )
-        print("쿼리:")
-        print("-" * 80)  # 구분선 추가
-        print(formatted_sql)
-        print("-" * 80)  # 구분선 추가
-        print(f"  실행 횟수: {digest['execution_count']:,}")
-        print(f"  전체 실행 시간: {digest['total_time']:.2f}초")
-        print(f"  평균 실행 시간: {digest['avg_time']:.3f}초")
-        print(f"  평균 조회 행 수: {digest['avg_examined_rows']:.1f}")
-        print(f"  사용자 목록: {', '.join(digest['users'])}")
-        print(f"  첫 실행: {digest['first_seen']}")
-        print(f"  마지막 실행: {digest['last_seen']}")
+        # 상위 10개 다이제스트 통계 출력
+        print("\n=== 상위 10개 다이제스트 통계 ===")
+        for i, digest in enumerate(stats['digest_stats'][:10], 1):
+            print(f"\n{i}. 다이제스트:")
+            # SQL 포맷팅
+            formatted_sql = sqlparse.format(
+                digest['digest_query'],
+                reindent=True,
+                keyword_case='upper',
+                indent_width=2
+            )
+            print("쿼리:")
+            print("-" * 80)  # 구분선 추가
+            print(formatted_sql)
+            print("-" * 80)  # 구분선 추가
+            print(f"  실행 횟수: {digest['execution_count']:,}")
+            print(f"  전체 실행 시간: {digest['total_time']:.2f}초")
+            print(f"  평균 실행 시간: {digest['avg_time']:.3f}초")
+            print(f"  평균 조회 행 수: {digest['avg_examined_rows']:.1f}")
+            print(f"  사용자 목록: {', '.join(digest['users'])}")
+            print(f"  첫 실행: {digest['first_seen']}")
+            print(f"  마지막 실행: {digest['last_seen']}")
 
 
 if __name__ == "__main__":
@@ -246,7 +271,7 @@ if __name__ == "__main__":
     DEFAULT_TARGET_MONTH = 11
 
     # 커맨드 라인 인자 파싱
-    parser = argparse.ArgumentParser(description='월간 슬로우 쿼리 분석')
+    parser = argparse.ArgumentParser(description='월간 슬로우 쿼리 분석 및 저장')
     parser.add_argument('--year', type=int, default=DEFAULT_TARGET_YEAR,
                         help=f'분석 년도 (기본값: {DEFAULT_TARGET_YEAR})')
     parser.add_argument('--month', type=int, default=DEFAULT_TARGET_MONTH,
@@ -261,16 +286,10 @@ if __name__ == "__main__":
         print("분석할 인스턴스가 없습니다. REPORT_TARGET_INSTANCES 환경 변수를 확인해주세요.")
         exit(1)
 
-    print(f"\n{args.year}년 {args.month}월 슬로우 쿼리 분석 시작\n")
+    print(f"\n{args.year}년 {args.month}월 슬로우 쿼리 분석 및 저장 시작\n")
 
-
-    async def analyze_all_instances():
-        for instance_id in target_instances:
-            print(f"\n{'=' * 50}")
-            print(f"인스턴스 {instance_id} 분석")
-            print(f"{'=' * 50}")
-            await print_monthly_analysis(instance_id, args.year, args.month)
-
-
-    # 비동기 실행
-    asyncio.run(analyze_all_instances())
+    # MonthlySlowQueryAnalyzer 인스턴스 생성 및 실행
+    analyzer = MonthlySlowQueryAnalyzer()
+    asyncio.run(analyzer.analyze_and_store_all_instances(
+        target_instances, args.year, args.month
+    ))

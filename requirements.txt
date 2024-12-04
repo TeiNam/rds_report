@@ -63,3 +63,5 @@ watchfiles==0.24.0
 websockets==14.0
 yarl==1.17.2
 zope.interface==7.1.1
+
+sqlparse~=0.5.2
