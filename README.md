@@ -11,81 +11,83 @@ MONGODB_DB_NAME=mgmt_db
 
 ## 리포트 대상 인스턴스 지정
 REPORT_TARGET_INSTANCES=["","",""]
+
+## Ai Api Key Settings
+OPENAI_API_KEY=your-openai-key
+ANTHROPIC_API_KEY=your-anthropic-key
+OLLAMA_BASE_URL=http://localhost:11434/api
 ```
 
 ### 프로젝트의 소스 코드 트리 구조
 ```angular2html
-rds_report/
-├── README.md
-├── __init__.py
-├── apis/
-│   ├── __init__.py
-│   └── v1/
-│       ├── __init__.py
-│       ├── aws_account.py
-│       └── monthly_report.py
-├── collectors/
-│   ├── __init__.py
-│   ├── cloudwatch_metric_collector.py
-│   ├── cloudwatch_slowquery_collector.py
-│   └── rds_instance_collector.py
-├── configs/
-│   ├── __init__.py
-│   ├── ai_conf.py
-│   ├── cloudwatch_conf.py
-│   ├── mongo_conf.py
-│   └── report_settings.py
-├── models/
-│   └── aws_account.py
-├── modules/
-│   ├── __init__.py
-│   ├── ai/
-│   │   ├── __init__.py
-│   │   ├── exceptions.py
-│   │   ├── factory.py
-│   │   └── models/
-│   │       ├── __init__.py
-│   │       ├── bedrock.py
-│   │       ├── claude.py
-│   │       ├── interface.py
-│   │       ├── ollama.py
-│   │       └── openai.py
-│   ├── aws_account_module.py
-│   ├── aws_session_manager.py
-│   ├── instance_fetcher.py
-│   └── mongodb_connector.py
-├── report_tools/
-│   ├── __init__.py
-│   ├── base.py
-│   ├── generators/
-│   │   ├── __init__.py
-│   │   ├── base.py
-│   │   ├── fonts/
-│   │   │   └── MaruBuri.ttf
-│   │   ├── generate_monthly_report.py
-│   │   ├── instance_report.py
-│   │   ├── instance_trend.py
-│   │   └── metric_visualizer.py
-│   └── instance_statistics.py
-├── reports/
-│   └── 202410/
-│       ├── graphs/
-│       │   ├── account_distribution.png
-│       │   ├── class_distribution.png
-│       │   ├── env_distribution.png
-│       │   ├── instance_trend.png
-│       │   ├── metric_cpuutilization.png
-│       │   ├── metric_databaseconnections.png
-│       │   ├── metric_networkreceivethroughput.png
-│       │   ├── metric_networktransmitthroughput.png
-│       │   ├── metric_readiops.png
-│       │   ├── metric_writeiops.png
-│       │   └── region_distribution.png
-│       ├── rds_report_202410.md
-│       └── statistics.json
-├── main.py
-├── requirements.txt
-└── test_main.http
+📦 rds_report
+├── 📄 README.md
+├── 📄 __init__.py
+├── 📁 apis
+│   ├── 📄 __init__.py
+│   └── 📁 v1
+│       ├── 📄 __init__.py
+│       ├── 📄 aws_account.py
+│       ├── 📄 generate_report.py
+│       └── 📄 monthly_report.py
+├── 📁 collectors
+│   ├── 📄 __init__.py
+│   ├── 📄 cloudwatch_metric_collector.py
+│   ├── 📄 cloudwatch_slowquery_collector.py
+│   └── 📄 rds_instance_collector.py
+├── 📁 configs
+│   ├── 📄 __init__.py
+│   ├── 📄 ai_conf.py
+│   ├── 📄 cloudwatch_conf.py
+│   ├── 📄 mongo_conf.py
+│   └── 📄 report_settings.py
+├── 📄 main.py
+├── 📁 models
+│   └── 📄 aws_account.py
+├── 📁 modules
+│   ├── 📄 __init__.py
+│   ├── 📁 ai
+│   │   ├── 📄 __init__.py
+│   │   ├── 📄 exceptions.py
+│   │   ├── 📄 factory.py
+│   │   └── 📁 models
+│   │       ├── 📄 __init__.py
+│   │       ├── 📄 bedrock.py
+│   │       ├── 📄 claude.py
+│   │       ├── 📄 interface.py
+│   │       ├── 📄 ollama.py
+│   │       └── 📄 openai.py
+│   ├── 📄 aws_account_module.py
+│   ├── 📄 aws_session_manager.py
+│   ├── 📄 instance_fetcher.py
+│   └── 📄 mongodb_connector.py
+├── 📁 report_tools
+│   ├── 📄 __init__.py
+│   ├── 📄 base.py
+│   ├── 📁 generators
+│   │   ├── 📄 __init__.py
+│   │   ├── 📄 base.py
+│   │   ├── 📁 fonts
+│   │   │   └── 📄 MaruBuri.ttf
+│   │   ├── 📄 generate_monthly_report.py
+│   │   ├── 📄 instance_report.py
+│   │   ├── 📄 instance_trend.py
+│   │   └── 📄 metric_visualizer.py
+│   └── 📄 instance_statistics.py
+├── 📁 slowquery_tools
+│   ├── 📄 __init__.py
+│   ├── 📁 analyzers
+│   │   ├── 📄 __init__.py
+│   │   └── 📄 monthly_analyzer.py
+│   ├── 📄 base.py
+│   ├── 📁 loaders
+│   │   ├── 📄 __init__.py
+│   │   └── 📄 stats_loader.py
+│   └── 📁 stores
+│       ├── 📄 __init__.py
+│       └── 📄 slow_query_statistics_store.py
+├── 📄 requirements.txt
+└── 📄 test_main.http
 ```
 ### 프로젝트 구조는 다음과 같은 주요 컴포넌트로 구성
 1. APIs (apis/)
