@@ -37,6 +37,9 @@ class MongoSettings(BaseSettings):
     MONGO_SLOW_DIGEST_INFO_COLLECTION: str = os.getenv(
         "MONGO_SLOW_DIGEST_INFO_COLLECTION", "slow_digest_info"
     )
+    MONGO_DB_CREDENTIALS_COLLECTION: str = os.getenv(
+        "MONGO_DB_CREDENTIALS_COLLECTION", "db_credentials"
+    )
 
     class Config:
         env_file = ".env"
