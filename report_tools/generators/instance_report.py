@@ -6,7 +6,12 @@ import matplotlib.font_manager as fm
 import os
 from pathlib import Path
 from datetime import date, datetime
+import logging
 from report_tools.generators.base import BaseReportGenerator
+from modules.mongodb_connector import MongoDBConnector
+from configs.mongo_conf import mongo_settings
+
+logger = logging.getLogger(__name__)
 
 
 class ReportGenerator(BaseReportGenerator):
@@ -25,6 +30,9 @@ class ReportGenerator(BaseReportGenerator):
         # 그래프 디렉토리 설정
         self.graphs_dir = self.create_subdirectory("graphs")
 
+        # AWS 계정 정보 저장을 위한 딕셔너리
+        self.account_names = {}
+
         # 한글 폰트 설정
         self._set_korean_font()
 
@@ -35,39 +43,70 @@ class ReportGenerator(BaseReportGenerator):
 
     def _set_korean_font(self):
         """한글 폰트 설정"""
-        # 현재 파일의 위치를 기준으로 폰트 파일 경로 설정
-        current_dir = Path(__file__).parent
-        font_path = current_dir / 'fonts' / 'MaruBuri.ttf'
+        try:
+            # 현재 파일의 위치를 기준으로 폰트 파일 경로 설정
+            current_dir = Path(__file__).parent
+            font_path = current_dir / 'fonts' / 'MaruBuri.ttf'
 
-        if not font_path.exists():
-            raise FileNotFoundError(f"폰트 파일을 찾을 수 없습니다: {font_path}")
+            if not font_path.exists():
+                raise FileNotFoundError(f"폰트 파일을 찾을 수 없습니다: {font_path}")
 
-        # 폰트 매니저에 폰트 추가
-        fm.fontManager.addfont(str(font_path))
-        font_name = 'MaruBuri'
+            # 폰트 매니저에 폰트 추가
+            fm.fontManager.addfont(str(font_path))
+            font_name = 'MaruBuri'
 
-        # matplotlib 폰트 설정
-        plt.rcParams['font.family'] = font_name
-        plt.rcParams['axes.unicode_minus'] = False
+            # matplotlib 폰트 설정
+            plt.rcParams['font.family'] = font_name
+            plt.rcParams['axes.unicode_minus'] = False
 
-        # seaborn 폰트 설정
-        sns.set_style("whitegrid", {
-            'font.family': font_name,
-        })
+            # seaborn 폰트 설정
+            sns.set_style("whitegrid", {
+                'font.family': font_name,
+            })
 
-    def create_report(self, data: Dict[str, Any]) -> str:
+            logger.info("한글 폰트 설정 완료")
+        except Exception as e:
+            logger.error(f"한글 폰트 설정 실패: {str(e)}")
+            raise
+
+    async def load_account_names(self):
+        """MongoDB에서 AWS 계정 정보 로드"""
+        try:
+            collection = await MongoDBConnector.get_collection(
+                mongo_settings.MONGO_AWS_ACCOUNT_COLLECTION
+            )
+            async for doc in collection.find({}, {'aws_account_id': 1, 'aws_account_name': 1}):
+                self.account_names[doc['aws_account_id']] = doc['aws_account_name']
+            logger.info(f"AWS 계정 정보 로드 완료: {len(self.account_names)}개")
+        except Exception as e:
+            logger.error(f"AWS 계정 정보 로드 실패: {str(e)}")
+            raise
+
+    def get_account_name(self, account_id: str) -> str:
+        """계정 ID에 해당하는 이름 반환"""
+        return self.account_names.get(account_id, account_id)
+
+    async def create_report(self, data: Dict[str, Any]) -> str:
         """리포트 생성"""
         try:
-            print("데이터 확인:")
-            print(f"- total_instances: {data.get('total_instances')}")
-            print(f"- dev_instances: {data.get('dev_instances')}")
-            print(f"- prd_instances: {data.get('prd_instances')}")
-            print(f"- accounts count: {len(data.get('accounts', []))}")
-            print(f"- regions count: {len(data.get('regions', []))}")
+            # AWS 계정 정보 로드
+            await self.load_account_names()
+
+            # 계정 정보 매핑
+            for account in data['accounts']:
+                account_id = account['account_id']
+                account['display_name'] = self.get_account_name(account_id)
+
+            logger.info("데이터 확인:")
+            logger.info(f"- total_instances: {data.get('total_instances')}")
+            logger.info(f"- dev_instances: {data.get('dev_instances')}")
+            logger.info(f"- prd_instances: {data.get('prd_instances')}")
+            logger.info(f"- accounts count: {len(data.get('accounts', []))}")
+            logger.info(f"- regions count: {len(data.get('regions', []))}")
 
             # 그래프 생성
             self._create_pie_chart(
-                data['accounts'], 'account_id', 'instance_count',
+                data['accounts'], 'display_name', 'instance_count',
                 "계정별 인스턴스 분포", "account_distribution.png"
             )
 
@@ -93,12 +132,12 @@ class ReportGenerator(BaseReportGenerator):
 
             # 마크다운 리포트 생성
             report_file = self.get_report_path("rds_report.md")
-            self._create_markdown_report(data, report_file)
+            await self._create_markdown_report(data, report_file)
 
             return report_file
 
         except Exception as e:
-            print(f"오류 발생: {str(e)}")
+            logger.error(f"리포트 생성 중 오류 발생: {str(e)}")
             raise
 
     def _create_pie_chart(self, data: List[Dict], label_key: str, value_key: str,
@@ -117,7 +156,6 @@ class ReportGenerator(BaseReportGenerator):
         font_prop = fm.FontProperties(fname=str(Path(__file__).parent / 'fonts' / 'MaruBuri.ttf'))
 
         if not valid_data:
-            # 데이터가 없거나 모두 0인 경우
             plt.text(0.5, 0.5, '데이터 없음',
                      horizontalalignment='center',
                      verticalalignment='center',
@@ -126,10 +164,7 @@ class ReportGenerator(BaseReportGenerator):
             plt.axis('off')
         else:
             try:
-                # 유효한 데이터로 차트 생성
                 labels, values = zip(*valid_data)
-
-                # 값들의 합이 0인지 확인
                 total = sum(values)
                 if total <= 0:
                     raise ValueError("Total sum of values is 0 or negative")
@@ -142,7 +177,6 @@ class ReportGenerator(BaseReportGenerator):
 
                 plt.title(title, pad=20, size=14, fontproperties=font_prop)
 
-                # 범례 추가
                 legend = plt.legend(labels,
                                     title="항목",
                                     loc="upper left",
@@ -151,9 +185,8 @@ class ReportGenerator(BaseReportGenerator):
                 legend.get_title().set_fontproperties(font_prop)
 
             except Exception as e:
-                print(f"파이 차트 생성 중 오류 발생: {str(e)}")
-                # 오류 발생 시 "데이터 없음" 표시
-                plt.clf()  # 기존 plot 초기화
+                logger.error(f"파이 차트 생성 중 오류 발생: {str(e)}")
+                plt.clf()
                 plt.text(0.5, 0.5, '데이터 없음',
                          horizontalalignment='center',
                          verticalalignment='center',
@@ -161,7 +194,6 @@ class ReportGenerator(BaseReportGenerator):
                          fontproperties=font_prop)
                 plt.axis('off')
 
-        # 저장
         output_path = os.path.join(self.graphs_dir, filename)
         plt.savefig(output_path, bbox_inches='tight', dpi=300)
         plt.close()
@@ -172,20 +204,15 @@ class ReportGenerator(BaseReportGenerator):
         """바 차트 생성"""
         plt.figure(figsize=(12, 6))
 
-        # 데이터 준비
         names = [item['name'] for item in data]
         counts = [item['count'] for item in data]
 
-        # 폰트 설정
         font_prop = fm.FontProperties(fname=str(Path(__file__).parent / 'fonts' / 'MaruBuri.ttf'))
 
-        # 바 차트 생성 (seaborn 대신 matplotlib 사용)
         bars = plt.bar(range(len(names)), counts, color=self.COLORS[:len(data)])
 
-        # x축 레이블 설정
         plt.xticks(range(len(names)), names, rotation=45, ha='right', fontproperties=font_prop)
 
-        # 바 위에 값 표시
         for i, count in enumerate(counts):
             plt.text(i, count, str(count), ha='center', va='bottom')
 
@@ -193,10 +220,8 @@ class ReportGenerator(BaseReportGenerator):
         plt.xlabel("인스턴스 클래스", fontproperties=font_prop)
         plt.ylabel("인스턴스 수", fontproperties=font_prop)
 
-        # 여백 조정
         plt.tight_layout()
 
-        # 저장
         output_path = os.path.join(self.graphs_dir, filename)
         plt.savefig(output_path, bbox_inches='tight', dpi=300)
         plt.close()
@@ -204,28 +229,17 @@ class ReportGenerator(BaseReportGenerator):
         return os.path.join("graphs", filename)
 
     def _calculate_percentage(self, value: int, total: int) -> str:
-        """백분율 계산 (0으로 나누기 방지)
-
-        Args:
-            value: 계산할 값
-            total: 전체 값
-
-        Returns:
-            str: 백분율 문자열 (소수점 1자리)
-        """
+        """백분율 계산"""
         if total == 0:
             return "0.0"
         return f"{(value / total) * 100:.1f}"
 
-    def _create_markdown_report(self, data: Dict[str, Any], output_file: str):
+    async def _create_markdown_report(self, data: Dict[str, Any], output_file: str):
         """마크다운 형식의 리포트 생성"""
-        # 날짜는 YYYY-MM 형식으로 변환
         report_date = data.get('date', date.today().strftime("%Y-%m-%d"))
         try:
-            # 날짜 문자열을 datetime으로 파싱 후 YYYY-MM 형식으로 변환
             formatted_date = datetime.strptime(report_date, "%Y-%m-%d").strftime("%Y-%m")
         except:
-            # 파싱 실패 시 현재 날짜를 YYYY-MM 형식으로
             formatted_date = date.today().strftime("%Y-%m")
 
         total_instances = data['total_instances']
@@ -252,20 +266,18 @@ class ReportGenerator(BaseReportGenerator):
 ### 2.2 계정별 인스턴스 현황
 ![계정별 분포](graphs/account_distribution.png)
 
-| Account ID | Instance Count | 비율(%) |
-|------------|---------------|---------|"""
+| Account Name | Account ID | Instance Count | 비율(%) |
+|-------------|------------|----------------|---------|"""
 
-        # 계정별 통계
         for account in sorted(data['accounts'], key=lambda x: x['instance_count'], reverse=True):
             percentage = self._calculate_percentage(account['instance_count'], total_instances)
-            report_content += f"\n| {account['account_id']} | {account['instance_count']} | {percentage} |"
+            report_content += f"\n| {account['display_name']} | {account['account_id']} | {account['instance_count']} | {percentage} |"
 
         report_content += "\n\n### 2.3 리전별 인스턴스 현황\n"
         report_content += "![리전별 분포](graphs/region_distribution.png)\n\n"
         report_content += "| Region | Instance Count | 비율(%) |\n"
         report_content += "|--------|----------------|----------|\n"
 
-        # 리전별 통계
         for region in sorted(data['regions'], key=lambda x: x['instance_count'], reverse=True):
             percentage = self._calculate_percentage(region['instance_count'], total_instances)
             report_content += f"| {region['region']} | {region['instance_count']} | {percentage} |\n"
@@ -275,7 +287,6 @@ class ReportGenerator(BaseReportGenerator):
         report_content += "| Instance Class | Count | 비율(%) |\n"
         report_content += "|----------------|-------|----------|\n"
 
-        # 인스턴스 클래스별 통계 (내림차순 정렬)
         sorted_classes = sorted(data['instance_classes'].items(), key=lambda x: x[1], reverse=True)
         for class_name, count in sorted_classes:
             percentage = self._calculate_percentage(count, total_instances)
@@ -290,18 +301,18 @@ if __name__ == "__main__":
     import asyncio
     from report_tools.instance_statistics import InstanceStatisticsTool
 
-
-    async def main():
+    async def test_generate():
         try:
+            # MongoDB 초기화
+            await MongoDBConnector.initialize()
+
             # 통계 데이터 수집
             stats_tool = InstanceStatisticsTool()
             daily_stats = await stats_tool.get_daily_statistics()
 
-            # 리포트 생성기 초기화
-            generator = ReportGenerator()
-
             # 리포트 생성
-            report_file = generator.create_report(daily_stats)
+            generator = ReportGenerator()
+            report_file = await generator.create_report(daily_stats)
             print(f"리포트가 성공적으로 생성되었습니다: {report_file}")
             print(f"그래프 파일들이 {generator.graphs_dir} 디렉토리에 저장되었습니다.")
 
@@ -309,6 +320,13 @@ if __name__ == "__main__":
             print(f"리포트 생성 중 오류가 발생했습니다: {str(e)}")
             raise
 
+        finally:
+            # MongoDB 연결 종료
+            await MongoDBConnector.close()
 
-    # asyncio 이벤트 루프 실행
-    asyncio.run(main())
+            # asyncio 이벤트 루프 실행
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        )
+        asyncio.run(test_generate())

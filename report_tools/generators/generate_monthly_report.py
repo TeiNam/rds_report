@@ -90,7 +90,8 @@ async def generate_monthly_report(year: int = None, month: int = None) -> dict:
 
         # 리포트 및 그래프 생성
         report_generator = ReportGenerator(generator.output_dir)
-        report_file = report_generator.create_report(daily_stats)
+        # await 추가
+        report_file = await report_generator.create_report(daily_stats)
 
         print("\n5. 리포트 생성 완료")
         print(f"- 리포트 파일: {report_file}")
@@ -112,13 +113,23 @@ async def generate_monthly_report(year: int = None, month: int = None) -> dict:
 
             if period_stats['instances_added']:
                 f.write("### 신규 생성된 인스턴스\n")
-                for instance in period_stats['instances_added']:
+                # 생성일 기준으로 정렬 (오래된 순)
+                sorted_added = sorted(
+                    period_stats['instances_added'],
+                    key=lambda x: x['created_at']
+                )
+                for instance in sorted_added:
                     f.write(f"- {instance['id']} (생성일: {instance['created_at']})\n")
                 f.write("\n")
 
             if period_stats['instances_removed']:
                 f.write("### 삭제된 인스턴스\n")
-                for instance in period_stats['instances_removed']:
+                # 삭제일 기준으로 정렬 (오래된 순)
+                sorted_removed = sorted(
+                    period_stats['instances_removed'],
+                    key=lambda x: x['deleted_at']
+                )
+                for instance in sorted_removed:
                     f.write(f"- {instance['id']} (삭제일: {instance['deleted_at']})\n")
                 f.write("\n")
 
