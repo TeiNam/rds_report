@@ -72,8 +72,8 @@ GET {{baseUrl}}/v1/reports/monthly/metrics?year=2024&month=08&env=prd
 
 ### 월간 메트릭 수집 (특정 연도/월 - 프로덕션)
 GET {{baseUrl}}/v1/reports/gather/cw_metrics
-    ?year=2024
-    &month=11
+    ?year=2025
+    &month=1
     &env=prd
 
 ### 월간 메트릭 수집 (특정 연도/월 - 개발)
@@ -87,8 +87,8 @@ POST http://localhost:8000/api/v1/reports/generate
 Content-Type: application/json
 
 {
-    "year": 2024,
-    "month": 11
+    "year": 2025,
+    "month": 1
 }
 
 ### RDS 월간 리포트 생성 (전월)

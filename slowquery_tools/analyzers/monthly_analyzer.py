@@ -267,8 +267,8 @@ if __name__ == "__main__":
     load_dotenv()
 
     # 기본 타겟 년월 설정
-    DEFAULT_TARGET_YEAR = 2024
-    DEFAULT_TARGET_MONTH = 11
+    DEFAULT_TARGET_YEAR = 2025
+    DEFAULT_TARGET_MONTH = 1
 
     # 커맨드 라인 인자 파싱
     parser = argparse.ArgumentParser(description='월간 슬로우 쿼리 분석 및 저장')

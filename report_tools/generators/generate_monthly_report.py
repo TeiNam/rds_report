@@ -221,15 +221,16 @@ async def generate_monthly_report(year: int = None, month: int = None) -> dict:
                 m -= 12
 
             try:
-                # 정확한 인스턴스 이름으로 필터링
                 cursor = collection.find({
                     "env": "prd",
                     "year": y,
                     "month": m,
-                    "instance_id": {"$in": target_instances}  # 정확한 일치 검사
+                    "instance_id": {"$in": target_instances}
                 })
 
                 async for doc in cursor:
+                    # 연도-월 정보를 추가
+                    doc['yearmonth'] = f"{y}-{m:02d}"  # 추가된 부분
                     print(f"- {y}년 {m}월 {doc['instance_id']} 메트릭 데이터 조회 완료")
                     metric_data.append(doc)
 
@@ -239,11 +240,14 @@ async def generate_monthly_report(year: int = None, month: int = None) -> dict:
         if metric_data:
             print(f"총 {len(metric_data)}개월의 메트릭 데이터 조회됨")
 
+            # 연도와 월 기준으로 정렬
+            metric_data.sort(key=lambda x: (x['year'], x['month']))
+
             # 시각화 생성
             visualizer = MetricVisualizer(generator.output_dir)
             visualizer.create_metric_visualizations(
-                target_instances,  # ReportSettings에서 가져온 목록 사용
-                metric_data,
+                target_instances,
+                metric_data,  # 정렬된 데이터 전달
                 report_file
             )
             print("메트릭 시각화 완료")

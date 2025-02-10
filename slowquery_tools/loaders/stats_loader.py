@@ -27,11 +27,10 @@ class SlowQueryStatsLoader:
             start_date: Optional[datetime] = None,
             end_date: Optional[datetime] = None,
     ) -> List[Dict]:
-        """인스턴스의 슬로우 쿼리 통계 데이터 조회"""
         try:
             collection = await self._get_collection()
 
-            # 쿼리 조건 구성
+            # 기존 매칭 조건은 유지
             match_stage = {"instance_id": instance_id}
             if start_date or end_date:
                 match_stage["date"] = {}
@@ -40,7 +39,7 @@ class SlowQueryStatsLoader:
                 if end_date:
                     match_stage["date"]["$lte"] = end_date.strftime("%Y-%m-%d")
 
-            # 집계 파이프라인
+            # 정렬 조건 추가: 연도와 월을 기준으로 정렬
             pipeline = [
                 {"$match": match_stage},
                 {"$unwind": "$slow_queries"},
@@ -50,21 +49,22 @@ class SlowQueryStatsLoader:
                         "date": 1,
                         "year": 1,
                         "month": 1,
-                        "env": 1,
+                        # 누락된 필드들 추가
                         "digest_query": "$slow_queries.digest_query",
                         "execution_count": "$slow_queries.execution_count",
-                        "avg_time": "$slow_queries.avg_time",
                         "total_time": "$slow_queries.total_time",
-                        "avg_lock_time": "$slow_queries.avg_lock_time",
-                        "avg_rows_sent": "$slow_queries.avg_rows_sent",
+                        "avg_time": "$slow_queries.avg_time",
                         "avg_rows_examined": "$slow_queries.avg_rows_examined",
                         "users": "$slow_queries.users",
-                        "hosts": "$slow_queries.hosts",
                         "first_seen": "$slow_queries.first_seen",
                         "last_seen": "$slow_queries.last_seen"
                     }
                 },
-                {"$sort": {"total_time": -1}}
+                {"$sort": {
+                    "year": 1,
+                    "month": 1,
+                    "total_time": -1
+                }}
             ]
 
             # 결과 조회

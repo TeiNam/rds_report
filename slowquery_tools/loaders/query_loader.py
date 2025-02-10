@@ -181,8 +181,8 @@ if __name__ == "__main__":
 
     load_dotenv()
 
-    YEAR = 2024
-    MONTH = 11
+    YEAR = 2025
+    MONTH = 1
     # 특정 인스턴스만 조회하고 싶을 경우
     #INSTANCE_ID = "orderservice"
 

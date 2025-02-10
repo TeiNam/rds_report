@@ -42,6 +42,7 @@ class InstanceStatisticsTool(ReportBaseTool):
             today = today.replace(hour=0, minute=0, second=0, microsecond=0)
 
             # 기본 통계 파이프라인
+            # 기본 통계 파이프라인 수정
             pipeline = [
                 {
                     "$match": {
@@ -78,19 +79,15 @@ class InstanceStatisticsTool(ReportBaseTool):
                             }
                         },
                         "regions": {"$addToSet": "$instances.Region"},
-                        "instance_classes": {"$push": "$instances.DBInstanceClass"}
-                    }
-                },
-                {
-                    "$project": {
-                        "_id": 0,
-                        "date": {"$dateToString": {"format": "%Y-%m-%d", "date": today}},
-                        "total_instances": 1,
-                        "account_count": {"$size": "$accounts"},
-                        "dev_instances": 1,
-                        "prd_instances": 1,
-                        "region_count": {"$size": "$regions"},
-                        "instance_classes": 1
+                        "instance_classes": {
+                            "$push": {
+                                "$cond": [
+                                    {"$eq": ["$instances.Engine", "aurora-mysql-serverless"]},
+                                    "serverless",
+                                    "$instances.DBInstanceClass"
+                                ]
+                            }
+                        }
                     }
                 }
             ]
