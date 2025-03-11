@@ -250,8 +250,8 @@ class ReportGenerator(BaseReportGenerator):
 - 총 인스턴스 수: {total_instances}
 - 개발 인스턴스: {data['dev_instances']}
 - 운영 인스턴스: {data['prd_instances']}
-- 총 계정 수: {data['account_count']}
-- 총 리전 수: {data['region_count']}
+- 총 계정 수: {data.get('account_count', 0)}
+- 총 리전 수: {data.get('region_count', 0)}
 
 ## 2. 인스턴스 분포 현황
 

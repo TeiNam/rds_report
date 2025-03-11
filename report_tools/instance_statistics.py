@@ -169,6 +169,24 @@ class InstanceStatisticsTool(ReportBaseTool):
             result["accounts"] = await self._aggregate_data(account_pipeline)
             result["regions"] = await self._aggregate_data(region_pipeline)
 
+            # account_count와 region_count 계산 추가
+            result["account_count"] = len(result["accounts"])
+            result["region_count"] = len(result["regions"])
+
+            # date 필드 추가
+            result["date"] = today.date().isoformat()
+
+            # _id 필드 제거 (필요 없는 필드)
+            if "_id" in result:
+                del result["_id"]
+
+            logger.info(f"{today.date().isoformat()} 일자 인스턴스 통계 조회 완료")
+            logger.info(f"- 총 인스턴스 수: {result['total_instances']}")
+            logger.info(f"- 개발 인스턴스: {result['dev_instances']}")
+            logger.info(f"- 운영 인스턴스: {result['prd_instances']}")
+            logger.info(f"- 계정 수: {result['account_count']}")
+            logger.info(f"- 리전 수: {result['region_count']}")
+
             return result
 
         except Exception as e:
