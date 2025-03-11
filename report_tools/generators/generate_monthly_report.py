@@ -61,6 +61,32 @@ async def generate_monthly_report(year: int = None, month: int = None) -> dict:
         print(f"- 추가된 인스턴스: {len(period_stats['instances_added'])}개")
         print(f"- 제거된 인스턴스: {len(period_stats['instances_removed'])}개")
 
+        # 이전 달 데이터와의 일관성 검증 (추가)
+        db = await MongoDBConnector.get_database()
+        prev_collection = db[mongo_settings.MONGO_MONTHLY_INSTANCE_STATISTICS_COLLECTION]
+
+        # 이전 달 데이터 조회
+        prev_year, prev_month = year, month - 1
+        if prev_month == 0:
+            prev_year -= 1
+            prev_month = 12
+
+        prev_data = await prev_collection.find_one({"year": prev_year, "month": prev_month})
+
+        if prev_data and 'statistics' in prev_data:
+            prev_end_instances = prev_data['statistics'].get('period_statistics', {}).get('total_instances_end', 0)
+            curr_start_instances = period_stats['total_instances_start']
+
+            # 이전 달 종료 인스턴스 수와 현재 달 시작 인스턴스 수가 다르면 경고 로그 출력
+            if prev_end_instances != curr_start_instances:
+                logger.warning(f"데이터 일관성 문제: 이전 달({prev_year}-{prev_month:02d}) 종료 인스턴스({prev_end_instances})와 "
+                               f"현재 달({year}-{month:02d}) 시작 인스턴스({curr_start_instances})가 일치하지 않습니다.")
+
+                # 일관성을 위해 시작 인스턴스 수 조정 (선택사항)
+                if ReportSettings.get_adjust_inconsistent_data():
+                    period_stats['total_instances_start'] = prev_end_instances
+                    logger.info(f"데이터 일관성을 위해 시작 인스턴스 수를 {prev_end_instances}로 조정합니다.")
+
         # 마지막 날짜의 상세 통계 수집
         last_date = datetime.strptime(period_stats['data_range']['end'], "%Y-%m-%d")
         daily_stats = await stats_tool.get_daily_statistics(target_date=last_date)
@@ -90,7 +116,6 @@ async def generate_monthly_report(year: int = None, month: int = None) -> dict:
 
         # 리포트 및 그래프 생성
         report_generator = ReportGenerator(generator.output_dir)
-        # await 추가
         report_file = await report_generator.create_report(daily_stats)
 
         print("\n5. 리포트 생성 완료")

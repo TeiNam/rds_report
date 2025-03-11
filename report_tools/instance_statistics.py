@@ -194,17 +194,18 @@ class InstanceStatisticsTool(ReportBaseTool):
             raise
 
     async def get_period_statistics(self) -> Dict[str, Any]:
-        """설정된 기간의 인스턴스 통계 조회
-
-        Returns:
-            Dict[str, Any]: 기간별 통계 정보
-        """
         try:
             query_start, query_end = self.get_query_range()
             db = await self._get_database()
             collection = db[self.collection_name]
 
-            # 데이터 존재 기간 확인
+            # 이전 달의 마지막 날짜 데이터 확인 (추가)
+            previous_month_end_date = (query_start - timedelta(days=1)).replace(hour=0, minute=0, second=0,
+                                                                                microsecond=0)
+            previous_month_instances = await self._get_instance_ids(collection,
+                                                                    previous_month_end_date.strftime("%Y-%m-%d"))
+
+            # 데이터 존재 기간 확인 (기존 코드)
             date_range_pipeline = [
                 {
                     "$match": {
@@ -236,6 +237,12 @@ class InstanceStatisticsTool(ReportBaseTool):
             first_day_instances = await self._get_instance_ids(collection, first_date)
             last_day_instances = await self._get_instance_ids(collection, last_date)
 
+            # 이전 달 마지막 날짜 데이터가 있으면 그것을 first_day_instances로 사용 (추가)
+            if previous_month_instances:
+                logger.info(
+                    f"이전 달 마지막 날짜({previous_month_end_date.strftime('%Y-%m-%d')}) 인스턴스 수: {len(previous_month_instances)}")
+                first_day_instances = previous_month_instances
+
             # 추가된 인스턴스 생성일자 포함
             added_instances = list(last_day_instances - first_day_instances)
             added_details = await self._get_instance_creation_dates(collection, added_instances)
@@ -244,7 +251,7 @@ class InstanceStatisticsTool(ReportBaseTool):
             removed_instances = list(first_day_instances - last_day_instances)
             removed_details = await self._get_instance_deletion_dates(collection, removed_instances, last_date)
 
-            logger.info(f"첫날 ({first_date}) 인스턴스 수: {len(first_day_instances)}")
+            logger.info(f"시작 시점 인스턴스 수: {len(first_day_instances)}")
             logger.info(f"마지막날 ({last_date}) 인스턴스 수: {len(last_day_instances)}")
             logger.info(f"추가된 인스턴스: {len(added_instances)}")
             logger.info(f"제거된 인스턴스: {len(removed_instances)}")
@@ -261,7 +268,6 @@ class InstanceStatisticsTool(ReportBaseTool):
                     "end": last_date
                 }
             }
-
         except Exception as e:
             logger.error(f"기간별 통계 조회 중 오류 발생: {str(e)}")
             raise
